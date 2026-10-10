@@ -544,7 +544,10 @@ enum ProjectStore {
     private static let recentProjectsDefaultsKey = "cn.laogou.dogsc.recent-project-paths"
     @MainActor private static var systemRecentProjectsSynchronizationToken: UInt64 = 0
     private static var defaults: UserDefaults {
-        UserDefaults(suiteName: "cn.laogou.dogsc") ?? .standard
+        // Keep the development app's project catalog separate from the formal
+        // release. Reusing its suite can enumerate a protected project folder
+        // during launch before the development app has permission to read it.
+        UserDefaults(suiteName: Bundle.main.bundleIdentifier ?? "cn.laogou.dogsc") ?? .standard
     }
 
     static func createSession(
