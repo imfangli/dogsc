@@ -1005,7 +1005,7 @@ extension EditorInspectorView {
     var inferredContinuousCommandScope: EditorInteractionCommandScope {
         switch selectedInspector {
         case .frame: return .canvas
-        case .opening: return .project
+        case .opening, .subtitles: return .project
         case .camera: return .camera
         case .audio: return .audio
         case .cursor: return .cursor

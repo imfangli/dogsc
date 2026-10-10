@@ -142,7 +142,7 @@ struct EditorWorkspaceToolRail: View {
         case .camera: cameraAvailable
         case .audio: audioAvailable
         case .cursor: cursorAvailable
-        case .frame, .opening, .zoom: true
+        case .frame, .opening, .zoom, .subtitles: true
         }
     }
 
@@ -152,7 +152,7 @@ struct EditorWorkspaceToolRail: View {
         case .camera: return appLocalized("当前项目没有摄像头素材")
         case .audio: return appLocalized("当前项目没有系统声音或麦克风素材")
         case .cursor: return appLocalized("当前项目没有记录鼠标事件")
-        case .frame, .opening, .zoom: return tab.localizedLabel
+        case .frame, .opening, .zoom, .subtitles: return tab.localizedLabel
         }
     }
 }

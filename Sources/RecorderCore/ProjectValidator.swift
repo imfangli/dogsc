@@ -16,6 +16,7 @@ public enum ProjectValidationError: Error, Equatable, Sendable {
     case duplicateZoomID(UUID)
     case overlappingZoom(UUID, UUID)
     case invalidTimeline(reason: String)
+    case invalidSubtitles(reason: String)
 }
 
 extension ProjectValidationError: LocalizedError {
@@ -41,6 +42,8 @@ extension ProjectValidationError: LocalizedError {
             return "缩放片段的生效区间发生重叠。"
         case let .invalidTimeline(reason):
             return "时间线无效：\(reason)"
+        case let .invalidSubtitles(reason):
+            return "字幕无效：\(reason)"
         }
     }
 }
@@ -199,6 +202,12 @@ public enum ProjectValidator {
             )
         }
         try validate(project.timeline)
+        try validate(project.subtitles)
+    }
+
+    public static func validate(_ subtitles: SubtitleDocument) throws {
+        do { try subtitles.validate() }
+        catch { throw ProjectValidationError.invalidSubtitles(reason: error.localizedDescription) }
     }
 
     private static func finite(

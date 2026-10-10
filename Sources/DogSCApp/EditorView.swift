@@ -36,7 +36,11 @@ enum EditorInspectorRouting {
         _ selection: EditorSelection?,
         current: InspectorTab?
     ) -> InspectorTab? {
+        if current == .subtitles, selection == nil || selection == .canvas {
+            return current
+        }
         if case .primarySegment = selection {
+            if current == .subtitles { return current }
             return .audio
         }
         guard let current else { return nil }
@@ -445,6 +449,7 @@ struct EditorView: View {
             switch newValue {
             case .frame: editorStore.selection = .canvas
             case .opening: break
+            case .subtitles: editorStore.selection = .canvas
             case .zoom:
                 if selectedZoomID == nil { editorStore.selection = .zoomTrack }
             case .cursor: editorStore.selection = .cursor

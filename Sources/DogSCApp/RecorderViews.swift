@@ -402,6 +402,7 @@ enum InspectorTab: String, CaseIterable, Identifiable {
     case cursor = "光标"
     case camera = "摄像头"
     case audio = "声音"
+    case subtitles = "字幕"
 
     var id: String { rawValue }
     var localizedLabel: String { appLocalized(rawValue) }
@@ -414,6 +415,7 @@ enum InspectorTab: String, CaseIterable, Identifiable {
         case .cursor: return "cursorarrow.motionlines"
         case .camera: return "video.fill"
         case .audio: return "speaker.wave.2.fill"
+        case .subtitles: return "captions.bubble"
         }
     }
 }
