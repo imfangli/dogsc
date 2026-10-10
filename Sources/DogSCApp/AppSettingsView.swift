@@ -8,6 +8,7 @@ enum AppSettingsSection: String, CaseIterable, Identifiable {
     case editor
     case recording
     case permissions
+    case subtitleAI
     case about
 
     var id: Self { self }
@@ -18,6 +19,7 @@ enum AppSettingsSection: String, CaseIterable, Identifiable {
         case .editor: appLocalized("编辑器")
         case .recording: appLocalized("录制")
         case .permissions: appLocalized("权限")
+        case .subtitleAI: appLocalized("AI 校对")
         case .about: appLocalized("关于")
         }
     }
@@ -28,6 +30,7 @@ enum AppSettingsSection: String, CaseIterable, Identifiable {
         case .editor: "slider.horizontal.3"
         case .recording: "record.circle.fill"
         case .permissions: "lock.shield.fill"
+        case .subtitleAI: "sparkles"
         case .about: "info.circle.fill"
         }
     }
@@ -38,6 +41,7 @@ enum AppSettingsSection: String, CaseIterable, Identifiable {
         case .editor: "预览与编辑工作区"
         case .recording: "开始录制时的默认选项"
         case .permissions: "管理录制所需的系统权限"
+        case .subtitleAI: "自定义字幕校对接口"
         case .about: nil
         }
     }
@@ -112,6 +116,7 @@ struct AppSettingsView: View {
                         case .editor: editorSettingsView
                         case .recording: recordingSettingsView
                         case .permissions: permissionSettingsView
+                        case .subtitleAI: SubtitleAIConfigurationEditor()
                         case .about: AppAboutSettingsView()
                         }
                     }

@@ -37,6 +37,8 @@
 
 详细操作和开发验证见 [语音跟读说明](docs/voice-follow.md)。
 
+编辑器左侧的 **字幕** 可在录制后使用苹果本机模型生成普通话字幕，支持麦克风、系统声音或成片混音。字幕可人工修改文字与时间，也可配置 OpenAI 兼容接口，结合口播稿和主题进行 AI 校对；默认白字、半透明黑色圆角底板，可调整颜色、字号和位置。预览与视频导出共用烧录效果，并支持 SRT 导出。识别需要 macOS 26+；详见 [字幕说明](docs/subtitles.md)。
+
 录制时可点 **标记按钮**或按 **⌃⌥M** 留下剪辑书签，方便之后找回口误、重录或重点位置。标记随项目保存，不会进入成片。
 
 ## 编辑与运镜
@@ -92,6 +94,8 @@ open ".build/local/DogSC Dev.app"
 脚本进行 Release 构建，组装图标、字体、本地化资源与 Sparkle，并签署完整 App。仅运行 `swift build -c release` 只编译可执行文件，不生成完整 `.app`。
 
 产物为 **`.build/local/DogSC Dev.app`**（`cn.laogou.dogsc.dev`）。它与下载的 **DogSC**（`cn.laogou.dogsc`）使用独立偏好和系统权限，授权时请区分名称；开发版不连接正式版更新源。
+
+可通过 `DOGSC_APP_OUTPUT` 指定其他开发版产物路径，用于保留已有构建。
 
 默认使用 `/Applications/Xcode.app`；其他安装位置可通过 `DEVELOPER_DIR` 指向对应的 `Xcode.app/Contents/Developer`。重新构建前请保存并退出正在运行的 DogSC。
 

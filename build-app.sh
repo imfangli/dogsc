@@ -4,7 +4,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 project_root="$PWD"
-app_output="$project_root/.build/local/DogSC Dev.app"
+app_output="${DOGSC_APP_OUTPUT:-$project_root/.build/local/DogSC Dev.app}"
 signing_identity="${DOGSC_SIGNING_IDENTITY:-}"
 
 if [[ -z "${DEVELOPER_DIR:-}" && -d /Applications/Xcode.app/Contents/Developer ]]; then

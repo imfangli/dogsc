@@ -255,6 +255,12 @@ enum SharedFrameRenderer {
                         canvasRect: canvasRect
                     )
                 }
+            case .subtitles:
+                guard let subtitle = scene.subtitle,
+                      let layer = SharedFrameSubtitleRenderer.image(
+                        scene: subtitle, canvasSize: scene.canvasSize
+                      ) else { continue }
+                result = layer.composited(over: result).cropped(to: canvasRect)
             }
         }
         return result.cropped(to: canvasRect)

@@ -48,10 +48,22 @@ actor MemoSpeechRecognizer: MemoSpeechSession {
     private var transcript = SpeechTranscriptWindow()
     private var revision: UInt64 = 0
     private var cancelled = false
-    private var reservedLocale: Locale?
+    private var localeLease: SpeechLocaleLease?
     private var cleanupTask: Task<Void, Never>?
 
     func prepare(
+        script: String, downloadModel: Bool,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws {
+        do {
+            try await prepareSession(script: script, downloadModel: downloadModel, progress: progress)
+        } catch {
+            await cancel()
+            throw error
+        }
+    }
+
+    private func prepareSession(
         script: String, downloadModel: Bool,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws {
@@ -66,12 +78,12 @@ actor MemoSpeechRecognizer: MemoSpeechSession {
         self.transcriber = transcriber
         // Installed models are shared by the OS, but this app must first
         // reserve their locale before status(forModules:) reports readiness.
-        let ownsReservation = try await AssetInventory.reserve(locale: locale)
+        let localeLease = try await SpeechLocaleReservations.shared.acquire(locale: locale)
         if cancelled || Task.isCancelled {
-            if ownsReservation { await AssetInventory.release(reservedLocale: locale) }
+            await localeLease.release()
             throw CancellationError()
         }
-        if ownsReservation { reservedLocale = locale }
+        self.localeLease = localeLease
         if await AssetInventory.status(forModules: [transcriber]) != .installed {
             guard downloadModel else { throw MemoSpeechError.modelRequired }
             if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
@@ -151,15 +163,15 @@ actor MemoSpeechRecognizer: MemoSpeechSession {
         let lease = self.lease
         self.lease = nil
         let analyzer = self.analyzer
-        let reservedLocale = self.reservedLocale
-        self.reservedLocale = nil
+        let localeLease = self.localeLease
+        self.localeLease = nil
         self.analyzer = nil
         transcriber = nil
         converter = nil
         let cleanup = Task {
             await lease?.release()
             await analyzer?.cancelAndFinishNow()
-            if let reservedLocale { await AssetInventory.release(reservedLocale: reservedLocale) }
+            await localeLease?.release()
         }
         cleanupTask = cleanup
         await cleanup.value

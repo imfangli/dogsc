@@ -371,6 +371,36 @@ public struct FrameStickerScene: Equatable, Sendable {
     public var layerIndex: Int
 }
 
+/// One already-selected cue in the final canvas coordinate space. Subtitles
+/// remain independent of recorded-screen crop, zoom, camera and sticker motion.
+public struct FrameSubtitleScene: Equatable, Sendable {
+    public var text: String
+    /// Output pixels, evaluated from the project's 1080-short-edge size.
+    public var fontSize: Double
+    public var textColor: HexColor
+    public var backgroundColor: HexColor
+    public var backgroundOpacity: Double
+    /// Output pixels measured from the bottom of the complete final canvas.
+    public var bottomInset: Double
+
+    public init(
+        text: String,
+        fontSize: Double,
+        textColor: HexColor = .white,
+        backgroundColor: HexColor = .black,
+        backgroundOpacity: Double = 0.62,
+        bottomInset: Double
+    ) {
+        self.text = text
+        self.fontSize = fontSize.isFinite ? max(fontSize, 0.1) : 44
+        self.textColor = textColor
+        self.backgroundColor = backgroundColor
+        self.backgroundOpacity = backgroundOpacity.isFinite
+            ? min(max(backgroundOpacity, 0), 1) : 0.62
+        self.bottomInset = bottomInset.isFinite ? max(bottomInset, 0) : 0
+    }
+}
+
 public enum FrameLayerRole: String, Equatable, Sendable {
     case background
     case screen
@@ -378,6 +408,7 @@ public enum FrameLayerRole: String, Equatable, Sendable {
     case spotlight
     case camera
     case stickers
+    case subtitles
 }
 
 /// Complete immutable interpretation of one project time. A renderer may read
@@ -392,6 +423,7 @@ public struct FrameScene: Equatable, Sendable {
     public var cursor: FrameCursorScene?
     public var stickers: [FrameStickerScene]
     public var stickerBackdrop: FrameStickerBackdropScene
+    public var subtitle: FrameSubtitleScene?
     public var layerOrder: [FrameLayerRole]
 
     public init(
@@ -404,6 +436,7 @@ public struct FrameScene: Equatable, Sendable {
         cursor: FrameCursorScene?,
         stickers: [FrameStickerScene] = [],
         stickerBackdrop: FrameStickerBackdropScene? = nil,
+        subtitle: FrameSubtitleScene? = nil,
         layerOrder: [FrameLayerRole]
     ) {
         self.time = time
@@ -415,6 +448,7 @@ public struct FrameScene: Equatable, Sendable {
         self.cursor = cursor
         self.stickers = stickers
         self.stickerBackdrop = stickerBackdrop ?? FrameStickerBackdropScene(stickers: stickers)
+        self.subtitle = subtitle
         self.layerOrder = layerOrder
     }
 }
@@ -478,6 +512,12 @@ public enum FrameSceneEvaluator {
             screen: plan.scene.screen,
             canvasSize: plan.scene.canvasSize
         )
+        result.scene.subtitle = FrameSubtitleEvaluator.scene(
+            project: project, at: time, outputDuration: plan.outputDuration,
+            canvasSize: plan.scene.canvasSize
+        )
+        result.scene.layerOrder.removeAll { $0 == .subtitles }
+        if result.scene.subtitle != nil { result.scene.layerOrder.append(.subtitles) }
         result.scene.layerOrder.removeAll { $0 == .cursor }
         if result.scene.cursor != nil,
            let screenIndex = result.scene.layerOrder.firstIndex(of: .screen) {
@@ -818,6 +858,11 @@ public enum FrameSceneEvaluator {
         }
         if camera != nil, camera?.opacity ?? 0 > 0 { order.append(.camera) }
         if !stickers.isEmpty { order.append(.stickers) }
+        let subtitle = FrameSubtitleEvaluator.scene(
+            project: project, at: sampleTime, outputDuration: outputDuration,
+            canvasSize: CompositionSize(width: width, height: height)
+        )
+        if subtitle != nil { order.append(.subtitles) }
         return FrameScene(
             time: sampleTime,
             canvasSize: CompositionSize(width: width, height: height),
@@ -833,6 +878,7 @@ public enum FrameSceneEvaluator {
             cursor: cursor,
             stickers: stickers,
             stickerBackdrop: stickerSample.backdrop,
+            subtitle: subtitle,
             layerOrder: order
         )
     }

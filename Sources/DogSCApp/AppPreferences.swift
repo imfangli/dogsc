@@ -13,6 +13,12 @@ func appLocalized(_ key: String) -> String {
 /// Core errors retain their stable domain values. Translate their presentation
 /// here, preserving associated versions, diagnostics and user-authored names.
 func appErrorDescription(_ error: any Error) -> String {
+    if let subtitle = error as? SubtitleEditingError {
+        if case let .invalidDocument(reason) = subtitle {
+            return String(format: appLocalized("字幕数据无效：%@"), appLocalized(reason))
+        }
+        return appLocalized(subtitle.localizedDescription)
+    }
     if let schema = error as? ProjectSchemaError {
         switch schema {
         case let .unsupportedLegacyVersion(found, minimumSupported):
@@ -43,6 +49,8 @@ func appErrorDescription(_ error: any Error) -> String {
             return String(format: appLocalized("缩放片段无效：%@"), appLocalized(reason))
         case let .invalidTimeline(reason):
             return String(format: appLocalized("时间线无效：%@"), appLocalized(reason))
+        case let .invalidSubtitles(reason):
+            return String(format: appLocalized("字幕数据无效：%@"), appLocalized(reason))
         case .duplicateZoomID, .overlappingZoom:
             return appLocalized(validation.localizedDescription)
         }

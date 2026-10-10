@@ -708,6 +708,8 @@ enum ProjectReducer {
             return .overlappingZoom(id, otherID)
         case let .invalidTimeline(reason):
             return .invalidTimeline(reason: reason)
+        case let .invalidSubtitles(reason):
+            return .invalidProjectDomain("字幕", reason: reason)
         }
     }
 

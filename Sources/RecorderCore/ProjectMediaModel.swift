@@ -164,6 +164,7 @@ public struct RecorderProject: Codable, Equatable, Sendable {
     public var timeline: ProjectTimeline
     public var media: ProjectMediaManifest?
     public var recordingMarkers: [RecordingMarker]
+    public var subtitles: SubtitleDocument
 
     /// Source-compatibility bridge while app call sites migrate to
     /// `timeline.zoomClips`. This is not a second persisted field.
@@ -187,7 +188,8 @@ public struct RecorderProject: Codable, Equatable, Sendable {
         zoomAnimations: [ZoomAnimationClip] = [],
         timeline: ProjectTimeline? = nil,
         media: ProjectMediaManifest? = nil,
-        recordingMarkers: [RecordingMarker] = []
+        recordingMarkers: [RecordingMarker] = [],
+        subtitles: SubtitleDocument = SubtitleDocument()
     ) {
         self.version = version
         self.title = title
@@ -203,6 +205,7 @@ public struct RecorderProject: Codable, Equatable, Sendable {
         self.timeline = timeline ?? ProjectTimeline(zoomClips: zoomAnimations)
         self.media = media
         self.recordingMarkers = recordingMarkers
+        self.subtitles = subtitles
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -222,6 +225,7 @@ public struct RecorderProject: Codable, Equatable, Sendable {
         case zoomAnimations
         case media
         case recordingMarkers
+        case subtitles
         // v1/v2 decode-only fields.
         case screenRecordingRelativePath
         case cameraRecordingRelativePath
@@ -245,6 +249,7 @@ public struct RecorderProject: Codable, Equatable, Sendable {
             forKey: .canvas
         )
         version = ProjectSchema.currentVersion
+        subtitles = try container.decodeIfPresent(SubtitleDocument.self, forKey: .subtitles) ?? SubtitleDocument()
         var markerIDs = Set<UUID>()
         recordingMarkers = try container.decodeIfPresent([RecordingMarker].self, forKey: .recordingMarkers)?
             .filter { $0.sourceTime.isFinite && $0.sourceTime >= 0 && $0.number > 0 && markerIDs.insert($0.id).inserted } ?? []
@@ -394,6 +399,7 @@ public struct RecorderProject: Codable, Equatable, Sendable {
         try container.encode(timeline, forKey: .timeline)
         try container.encodeIfPresent(media, forKey: .media)
         try container.encode(recordingMarkers, forKey: .recordingMarkers)
+        try container.encode(subtitles, forKey: .subtitles)
     }
 
 }

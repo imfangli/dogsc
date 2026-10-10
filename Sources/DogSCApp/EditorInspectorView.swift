@@ -62,6 +62,7 @@ struct EditorInspectorView: View {
     @State var savedLayoutPresetMenuHovered = false
     @State private var scrollPositions = AppScrollPositionMemory<EditorInspectorScrollContext>()
     @StateObject private var systemWallpaperCatalog = SystemWallpaperCatalog()
+    @StateObject private var subtitleController = EditorSubtitleController()
 
 
     init(
@@ -126,6 +127,7 @@ struct EditorInspectorView: View {
         case .cursor: ("光标", "全片")
         case .camera: ("摄像头", "全片基础布局")
         case .audio: ("声音", "全片")
+        case .subtitles: ("字幕", "全片")
         }
     }
 
@@ -153,6 +155,7 @@ struct EditorInspectorView: View {
                 break
             }
         }
+        .onDisappear { subtitleController.cancel() }
     }
 
     private var showsFrameInspectorNavigation: Bool {
@@ -275,6 +278,7 @@ struct EditorInspectorView: View {
 
     var inspectorHeader: (title: String, scope: String?) {
         if isCropping { return ("裁切", "屏幕素材") }
+        if selectedInspector == .subtitles { return header(for: .subtitles) }
         if primarySelectionKeepsInspectorTask {
             return header(for: selectedInspector)
         }
@@ -364,6 +368,13 @@ struct EditorInspectorView: View {
     var inspectorContent: some View {
         if isCropping {
             cropInspector
+        } else if selectedInspector == .subtitles {
+            EditorSubtitleInspector(
+                editorStore: editorStore,
+                mediaSession: mediaSession,
+                playbackController: playbackController,
+                controller: subtitleController
+            )
         } else if case .mosaic = editorStore.selection {
             overlayInspector
         } else if case .sticker = editorStore.selection {
@@ -387,6 +398,8 @@ struct EditorInspectorView: View {
             cameraInspector
         case .audio:
             audioInspector
+        case .subtitles:
+            EmptyView()
             }
         }
     }

@@ -89,7 +89,8 @@ struct PreviewVisualSignature: Equatable {
               lhs.screen == rhs.screen,
               lhs.camera == rhs.camera,
               lhs.stickers == rhs.stickers,
-              lhs.stickerBackdrop == rhs.stickerBackdrop else {
+              lhs.stickerBackdrop == rhs.stickerBackdrop,
+              lhs.subtitle == rhs.subtitle else {
             return false
         }
         if !ignoringCursor, lhs.cursor != rhs.cursor {
@@ -390,6 +391,9 @@ typealias SharedPreviewPlaybackFrameProvider = @MainActor (
 enum SharedPreviewFramePipeline {
     nonisolated static func canSeparateCursor(in plan: FrameRenderPlan) -> Bool {
         let scene = plan.scene
+        // A separate CALayer cursor sits above the raster canvas. Subtitles
+        // own the final top layer, including when the pointer crosses them.
+        if scene.subtitle != nil { return false }
         // The cursor is part of the suppressed recording. Keep it in the
         // shared composite while stickers hide the screen so the independent
         // CALayer cannot remain visible over a continuous sticker handoff.
