@@ -9,24 +9,41 @@ final class RecorderMemoStore: ObservableObject {
         static let text = "recorder.memo.text"
         static let fontSize = "recorder.memo.font-size"
         static let opacity = "recorder.memo.background-opacity"
+        static let hidesBlankLines = "recorder.memo.hides-blank-lines"
+        static let compact = "recorder.memo.compact"
+        static let compactOpacity = "recorder.memo.compact-background-opacity"
     }
 
     @Published var text: String { didSet { scheduleSave() } }
     @Published var fontSize: Double { didSet { scheduleSave() } }
     @Published var opacity: Double { didSet { scheduleSave() } }
+    @Published var hidesBlankLines: Bool { didSet { scheduleSave() } }
+    @Published var isCompact: Bool { didSet { scheduleSave() } }
+    @Published var compactOpacity: Double { didSet { scheduleSave() } }
     @Published var isEditing: Bool
+    private let defaults: UserDefaults
     private var pendingSave: Task<Void, Never>?
     private var hasChanges = false
 
-    init() {
-        let defaults = UserDefaults.standard
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         let savedText = defaults.string(forKey: Key.text) ?? ""
         text = savedText
         let savedSize = defaults.object(forKey: Key.fontSize) as? Double ?? 22
         let savedOpacity = defaults.object(forKey: Key.opacity) as? Double ?? 0.92
         fontSize = savedSize.isFinite ? min(max(savedSize, 16), 40) : 22
         opacity = savedOpacity.isFinite ? min(max(savedOpacity, 0.55), 1) : 0.92
-        isEditing = savedText.isEmpty
+        hidesBlankLines = defaults.bool(forKey: Key.hidesBlankLines)
+        let savedCompact = defaults.bool(forKey: Key.compact)
+        isCompact = savedCompact
+        let savedCompactOpacity = defaults.object(forKey: Key.compactOpacity) as? Double ?? 0.2
+        compactOpacity = savedCompactOpacity.isFinite ? min(max(savedCompactOpacity, 0), 1) : 0.2
+        isEditing = savedText.isEmpty && !savedCompact
+    }
+
+    func setCompact(_ enabled: Bool) {
+        if enabled { isEditing = false }
+        isCompact = enabled
     }
 
     private func scheduleSave() {
@@ -43,10 +60,12 @@ final class RecorderMemoStore: ObservableObject {
         pendingSave = nil
         guard hasChanges else { return }
         hasChanges = false
-        let defaults = UserDefaults.standard
         defaults.set(text, forKey: Key.text)
         defaults.set(fontSize, forKey: Key.fontSize)
         defaults.set(opacity, forKey: Key.opacity)
+        defaults.set(hidesBlankLines, forKey: Key.hidesBlankLines)
+        defaults.set(isCompact, forKey: Key.compact)
+        defaults.set(compactOpacity, forKey: Key.compactOpacity)
     }
 }
 
@@ -55,10 +74,15 @@ final class RecorderMemoController: NSObject, ObservableObject, NSWindowDelegate
     static let shared = RecorderMemoController()
     @Published private(set) var isVisible = false
     let store = RecorderMemoStore()
+    let speech = RecorderMemoSpeechController()
     private var panel: RecorderMemoPanel?
     private var screenObserver: NSObjectProtocol?
     private var shouldResumeAfterSelection = false
     private let frameKey = "recorder.memo.frame"
+
+    func configure(model: AppModel) {
+        speech.configure(model: model, store: store)
+    }
 
     func toggle(relativeTo owner: NSWindow) {
         if isVisible { hide() } else { show(relativeTo: owner) }
@@ -76,7 +100,8 @@ final class RecorderMemoController: NSObject, ObservableObject, NSWindowDelegate
         let proposed: NSRect
         if let savedFrame, savedFrame.width.isFinite, savedFrame.height.isFinite,
            savedFrame.minX.isFinite, savedFrame.minY.isFinite,
-           savedFrame.width >= 280, savedFrame.height >= 240 {
+           savedFrame.width >= Self.minimumWindowSize(isCompact: store.isCompact).width,
+           savedFrame.height >= Self.minimumWindowSize(isCompact: store.isCompact).height {
             proposed = savedFrame
         } else {
             let size = NSSize(width: 390, height: 420)
@@ -115,9 +140,8 @@ final class RecorderMemoController: NSObject, ObservableObject, NSWindowDelegate
             self?.constrainToScreen()
             self?.saveFrame()
         }
-        panel.contentViewController = NSHostingController(rootView:
-            RecorderMemoView(store: store, onClose: { [weak self] in self?.hide() })
-                .preferredColorScheme(.light).appControlFocusAppearance())
+        panel.contentViewController = Self.makeContentViewController(store: store, speech: speech,
+            onClose: { [weak self] in self?.hide() })
         panel.delegate = self
         self.panel = panel
         screenObserver = NotificationCenter.default.addObserver(
@@ -128,8 +152,20 @@ final class RecorderMemoController: NSObject, ObservableObject, NSWindowDelegate
         return panel
     }
 
+    static func makeContentViewController(store: RecorderMemoStore, speech: RecorderMemoSpeechController,
+                                          onClose: @escaping () -> Void) -> NSViewController {
+        let host = NSHostingController(rootView:
+            RecorderMemoView(store: store, speech: speech, onClose: onClose)
+                .preferredColorScheme(.light).appControlFocusAppearance())
+        // Window geometry belongs to the user. SwiftUI must not derive the
+        // panel's minimum height from the scrollable manuscript document.
+        host.sizingOptions = []
+        return host
+    }
+
     func hide() {
         shouldResumeAfterSelection = false
+        speech.stop()
         guard isVisible else { return }
         store.save()
         saveFrame()
@@ -178,13 +214,49 @@ final class RecorderMemoController: NSObject, ObservableObject, NSWindowDelegate
     }
 
     private func fit(_ panel: NSWindow, proposed: NSRect, safe: NSRect) {
-        let minSize = NSSize(width: min(300, safe.width), height: min(280, safe.height))
-        panel.contentMinSize = minSize
-        panel.contentMaxSize = NSSize(width: min(760, safe.width), height: min(1000, safe.height))
-        let width = min(max(proposed.width, minSize.width), panel.contentMaxSize.width)
-        let height = min(max(proposed.height, minSize.height), panel.contentMaxSize.height)
+        let minimum = Self.minimumWindowSize(isCompact: store.isCompact)
+        let maximum = Self.maximumWindowSize(isCompact: store.isCompact)
+        let minSize = NSSize(width: min(minimum.width, safe.width), height: min(minimum.height, safe.height))
+        let maxSize = NSSize(width: min(maximum.width, safe.width), height: min(maximum.height, safe.height))
+        let width = min(max(proposed.width, minSize.width), maxSize.width)
+        let height = min(max(proposed.height, minSize.height), maxSize.height)
         panel.setFrame(NSRect(x: min(max(proposed.minX, safe.minX), safe.maxX - width),
             y: min(max(proposed.minY, safe.minY), safe.maxY - height), width: width, height: height), display: true)
+    }
+
+    static func minimumWindowSize(isCompact: Bool) -> NSSize {
+        isCompact ? NSSize(width: 240, height: 140) : NSSize(width: 300, height: 340)
+    }
+
+    private static func maximumWindowSize(isCompact: Bool) -> NSSize {
+        isCompact ? NSSize(width: 1240, height: 1600) : NSSize(width: 760, height: 1000)
+    }
+
+    fileprivate static func sizingLimits(for window: NSWindow, isCompact: Bool) -> (minimum: NSSize, maximum: NSSize) {
+        var minimum = minimumWindowSize(isCompact: isCompact)
+        var maximum = maximumWindowSize(isCompact: isCompact)
+        if window is RecorderMemoPanel, let screen = window.screen ?? NSScreen.main {
+            let safe = screen.visibleFrame.insetBy(dx: 12, dy: 12).size
+            minimum = NSSize(width: min(minimum.width, safe.width), height: min(minimum.height, safe.height))
+            maximum = NSSize(width: min(maximum.width, safe.width), height: min(maximum.height, safe.height))
+        }
+        return (minimum, maximum)
+    }
+
+    static func applyWindowSizing(_ window: NSWindow, isCompact: Bool, proposedFrame: NSRect? = nil) {
+        let frame = proposedFrame ?? window.frame
+        let (minimum, maximum) = sizingLimits(for: window, isCompact: isCompact)
+        if window.hasShadow == isCompact { window.hasShadow = !isCompact }
+        let size = NSSize(width: min(max(frame.width, minimum.width), maximum.width),
+                          height: min(max(frame.height, minimum.height), maximum.height))
+        let targetFrame = NSRect(x: frame.minX, y: frame.maxY - size.height, width: size.width, height: size.height)
+        if window.frame != targetFrame {
+            // Grow downward when restoring the full controls.
+            window.setFrame(targetFrame, display: true)
+        }
+        if window.frame != frame {
+            window.delegate?.windowDidEndLiveResize?(Notification(name: NSWindow.didEndLiveResizeNotification, object: window))
+        }
     }
 }
 
@@ -218,39 +290,30 @@ struct RecorderMemoButton: View {
 
 private struct RecorderMemoView: View {
     @ObservedObject var store: RecorderMemoStore
+    @ObservedObject var speech: RecorderMemoSpeechController
     let onClose: () -> Void
+    @State private var showsCompactSettings = false
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                HStack(spacing: 9) {
-                    Image(systemName: "note.text").font(.appUI(size: 17))
-                        .frame(width: 32, height: 32)
-                        .background(RecorderStyle.mintWash, in: RoundedRectangle(cornerRadius: 10))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("备忘录").font(.appUI(size: 15, weight: .semibold))
-                        Text("仅自己可见").font(.appUI(size: 10)).foregroundStyle(RecorderStyle.muted)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .overlay { RecorderMemoWindowHandle(resizes: false) }
-                HStack(spacing: 2) {
-                    modeButton(editing: true, title: "编辑")
-                    modeButton(editing: false, title: "阅读")
-                }
-                .padding(3)
-                .background(RecorderStyle.line, in: RoundedRectangle(cornerRadius: 10))
-                .accessibilityIdentifier("recorder.memo.mode")
-                Button(action: onClose) {
-                    Image(systemName: "xmark").font(.appUI(size: 12)).frame(width: 28, height: 28)
-                }
-                .buttonStyle(RecorderCirclePressStyle())
-                .accessibilityLabel("收起备忘录")
+            if store.isCompact {
+                compactHeader
+            } else {
+                fullHeader
             }
-            .padding(.horizontal, 16).padding(.vertical, 12)
+
+            if !store.isCompact {
+                speechControls
+                    .padding(.horizontal, 18).padding(.bottom, 10)
+            }
 
             ZStack(alignment: .topLeading) {
-                RecorderMemoTextView(text: $store.text, fontSize: store.fontSize, isEditing: store.isEditing)
+                RecorderMemoTextView(text: $store.text, fontSize: store.fontSize, isEditing: store.isEditing,
+                    isCompact: store.isCompact,
+                    hidesBlankLines: store.hidesBlankLines,
+                    highlightedRange: speech.highlightedRange, scrollTargetRange: speech.readingRange, followRevision: speech.followRevision,
+                    selectedRange: $speech.selectedRange)
+                    .shadow(color: .black.opacity(store.isCompact ? 0.8 : 0), radius: 1, x: 0, y: 1)
                 if store.text.isEmpty {
                     Text("写下或粘贴要讲的内容…")
                         .font(.system(size: store.fontSize)).foregroundStyle(RecorderStyle.muted)
@@ -258,48 +321,245 @@ private struct RecorderMemoView: View {
                         .allowsHitTesting(false)
                 }
             }
-            .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+            .frame(maxWidth: .infinity, minHeight: 80, maxHeight: .infinity)
+            .background(Color.white.opacity(store.isCompact ? 0 : 0.12), in: RoundedRectangle(cornerRadius: 14))
             .clipShape(RoundedRectangle(cornerRadius: 14))
-            .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(RecorderStyle.line).allowsHitTesting(false) }
-            .padding(.horizontal, 12)
-
-            VStack(spacing: 10) {
-                HStack(spacing: 6) {
-                    fontButton("textformat.size.smaller", title: "缩小备忘录字号", enabled: store.fontSize > 16) {
-                        store.fontSize = max(16, store.fontSize - 2)
-                    }
-                    Text("\(Int(store.fontSize))").font(.appUI(size: 12)).monospacedDigit().frame(width: 24)
-                    fontButton("textformat.size.larger", title: "放大备忘录字号", enabled: store.fontSize < 40) {
-                        store.fontSize = min(40, store.fontSize + 2)
-                    }
-                    Spacer(minLength: 4)
-                    Text("自动保存到本机").font(.appUI(size: 10)).foregroundStyle(RecorderStyle.muted)
-                }
-                HStack(spacing: 9) {
-                    Text("背景不透明度").font(.appUI(size: 11))
-                    Slider(value: $store.opacity, in: 0.55...1)
-                        .tint(RecorderStyle.muted).controlSize(.small)
-                        .accessibilityLabel("备忘录背景不透明度")
-                    Text("\(Int((store.opacity * 100).rounded()))%")
-                        .font(.appUI(size: 11)).monospacedDigit().frame(width: 34, alignment: .trailing)
+            .overlay {
+                if !store.isCompact {
+                    RoundedRectangle(cornerRadius: 14).strokeBorder(RecorderStyle.line).allowsHitTesting(false)
                 }
             }
-            .padding(.horizontal, 18).padding(.top, 10).padding(.bottom, 16)
+            .padding(.horizontal, store.isCompact ? 6 : 12)
+            .padding(.bottom, store.isCompact ? 6 : 0)
+
+            if !store.isCompact {
+                settingsControls
+                    .padding(.horizontal, 18).padding(.top, 10).padding(.bottom, 16)
+            }
         }
-        .foregroundStyle(RecorderStyle.ink)
+        .foregroundStyle(store.isCompact ? .white : RecorderStyle.ink)
         // Only paper fades. Fading the entire NSWindow would also wash out text.
-        .background(LinearGradient(colors: [.white.opacity(store.opacity), RecorderStyle.silver.opacity(store.opacity)],
-            startPoint: .topLeading, endPoint: .bottomTrailing))
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.8)).allowsHitTesting(false) }
+        .background {
+            if store.isCompact {
+                Color.black.opacity(store.compactOpacity)
+            } else {
+                LinearGradient(colors: [.white.opacity(store.opacity), RecorderStyle.silver.opacity(store.opacity)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: store.isCompact ? 12 : 20, style: .continuous))
+        .overlay {
+            if !store.isCompact {
+                RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.8)).allowsHitTesting(false)
+            }
+        }
         .overlay(alignment: .bottomTrailing) {
             Image(systemName: "line.3.horizontal.decrease").font(.system(size: 9))
-                .rotationEffect(.degrees(-45)).foregroundStyle(RecorderStyle.muted.opacity(0.65))
+                .rotationEffect(.degrees(-45))
+                .foregroundStyle(store.isCompact ? .white.opacity(0.45) : RecorderStyle.muted.opacity(0.65))
                 .frame(width: 16, height: 16)
-                .overlay { RecorderMemoWindowHandle(resizes: true) }
+                .overlay { RecorderMemoWindowHandle(resizes: true, isCompact: store.isCompact) }
                 .padding(3)
         }
+        .background { RecorderMemoWindowConfiguration(isCompact: store.isCompact) }
         .accessibilityIdentifier("recorder.memo.content")
+        .onChange(of: store.isEditing) { _, isEditing in
+            if isEditing { speech.stop() }
+        }
+    }
+
+    private var fullHeader: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 9) {
+                Image(systemName: "note.text").font(.appUI(size: 17))
+                    .frame(width: 32, height: 32)
+                    .background(RecorderStyle.mintWash, in: RoundedRectangle(cornerRadius: 10))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("备忘录").font(.appUI(size: 15, weight: .semibold))
+                    Text("仅自己可见").font(.appUI(size: 10)).foregroundStyle(RecorderStyle.muted)
+                }
+                Spacer(minLength: 0)
+            }
+            .overlay { RecorderMemoWindowHandle(resizes: false) }
+            HStack(spacing: 2) {
+                modeButton(editing: true, title: "编辑")
+                modeButton(editing: false, title: "阅读")
+            }
+            .padding(3)
+            .background(RecorderStyle.line, in: RoundedRectangle(cornerRadius: 10))
+            .accessibilityIdentifier("recorder.memo.mode")
+            Button(action: onClose) {
+                Image(systemName: "xmark").font(.appUI(size: 12)).frame(width: 28, height: 28)
+            }
+            .buttonStyle(RecorderCirclePressStyle())
+            .accessibilityLabel("收起备忘录")
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+    }
+
+    private var compactHeader: some View {
+        HStack(spacing: 2) {
+            RoundedRectangle(cornerRadius: 1)
+                .fill(.white.opacity(0.4)).frame(width: 24, height: 2)
+                .frame(maxWidth: .infinity, minHeight: 22)
+                .overlay { RecorderMemoWindowHandle(resizes: false, isCompact: true) }
+                .help("拖动提词窗口")
+                .accessibilityHidden(true)
+            Button { showsCompactSettings.toggle() } label: {
+                Image(systemName: "ellipsis").font(.appUI(size: 13))
+                    .frame(width: 24, height: 22)
+            }
+            .buttonStyle(RecorderCirclePressStyle())
+            .accessibilityLabel("提词器设置")
+            .accessibilityIdentifier("recorder.memo.compact.settings")
+            .help("提词器设置")
+            .popover(isPresented: $showsCompactSettings, arrowEdge: .bottom) {
+                compactSettings
+            }
+            Button(action: onClose) {
+                Image(systemName: "xmark").font(.appUI(size: 10)).frame(width: 24, height: 22)
+            }
+            .buttonStyle(RecorderCirclePressStyle())
+            .accessibilityLabel("收起备忘录")
+        }
+        .padding(.horizontal, 6).padding(.vertical, 2)
+    }
+
+    private var compactSettings: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("提词器设置").font(.appUI(size: 12, weight: .semibold))
+                Spacer()
+                Button("退出精简模式") {
+                    showsCompactSettings = false
+                    store.setCompact(false)
+                }
+                .font(.appUI(size: 11))
+                .accessibilityIdentifier("recorder.memo.compact.exit")
+            }
+            HStack(spacing: 6) {
+                modeButton(editing: true, title: "编辑")
+                modeButton(editing: false, title: "阅读")
+                Spacer()
+            }
+            speechControls
+            Divider()
+            settingsControls
+        }
+        .padding(16).frame(width: 280)
+        .foregroundStyle(RecorderStyle.ink)
+        .preferredColorScheme(.light).appControlFocusAppearance()
+    }
+
+    private var settingsControls: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 6) {
+                fontButton("textformat.size.smaller", title: "缩小备忘录字号", enabled: store.fontSize > 16) {
+                    store.fontSize = max(16, store.fontSize - 2)
+                }
+                Text("\(Int(store.fontSize))").font(.appUI(size: 12)).monospacedDigit().frame(width: 24)
+                fontButton("textformat.size.larger", title: "放大备忘录字号", enabled: store.fontSize < 40) {
+                    store.fontSize = min(40, store.fontSize + 2)
+                }
+                Spacer(minLength: 4)
+                if !store.isCompact {
+                    Button { store.setCompact(true) } label: {
+                        Label("精简模式", systemImage: "arrow.down.right.and.arrow.up.left")
+                            .font(.appUI(size: 11)).padding(.horizontal, 8).padding(.vertical, 6)
+                    }
+                    .buttonStyle(RecorderButtonStyle())
+                    .accessibilityIdentifier("recorder.memo.compact.enter")
+                    .help("收起设置，只显示提词内容")
+                }
+            }
+            HStack(spacing: 8) {
+                Toggle(isOn: Binding(get: { store.hidesBlankLines }, set: { enabled in
+                    store.hidesBlankLines = enabled
+                    if enabled { store.isEditing = false }
+                })) {
+                    Text("隐藏空行").font(.appUI(size: 11))
+                }
+                .toggleStyle(.switch).controlSize(.small)
+                .accessibilityIdentifier("recorder.memo.hide-blank-lines")
+                .help("阅读时隐藏空行，编辑时显示原稿")
+                Spacer(minLength: 4)
+                Text("自动保存到本机").font(.appUI(size: 10)).foregroundStyle(RecorderStyle.muted)
+            }
+            HStack(spacing: 9) {
+                Text("背景不透明度").font(.appUI(size: 11))
+                Slider(value: backgroundOpacity, in: store.isCompact ? 0...1 : 0.55...1)
+                    .tint(RecorderStyle.muted).controlSize(.small)
+                    .accessibilityLabel("备忘录背景不透明度")
+                Text("\(Int((backgroundOpacity.wrappedValue * 100).rounded()))%")
+                    .font(.appUI(size: 11)).monospacedDigit().frame(width: 34, alignment: .trailing)
+            }
+        }
+    }
+
+    private var backgroundOpacity: Binding<Double> {
+        Binding(get: { store.isCompact ? store.compactOpacity : store.opacity }, set: { value in
+            if store.isCompact { store.compactOpacity = value } else { store.opacity = value }
+        })
+    }
+
+    private var speechControls: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Toggle(isOn: Binding(get: { speech.isEnabled }, set: { enabled in
+                    if enabled != speech.isEnabled { speech.toggle() }
+                })) {
+                    Text(appLocalized("语音跟读")).font(.appUI(size: 11, weight: .semibold))
+                }
+                .toggleStyle(.switch).controlSize(.small)
+                .disabled(!speech.isSupported || (store.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !speech.isEnabled))
+                .accessibilityIdentifier("recorder.memo.speech.toggle")
+                .help(appLocalized(speech.isEnabled ? "停止语音跟读" : "开始语音跟读"))
+                Spacer(minLength: 0)
+                if speech.isEnabled, !store.isEditing {
+                    speechButton("从选中位置跟读", action: speech.startFromSelection)
+                        .disabled(speech.isPreparing)
+                        .accessibilityIdentifier("recorder.memo.speech.selection")
+                }
+            }
+            HStack(alignment: .top, spacing: 7) {
+                if speech.isPreparing {
+                    ProgressView().controlSize(.mini)
+                        .accessibilityLabel(speech.statusText)
+                } else {
+                    Image(systemName: speech.isEnabled ? "waveform" : "lock.shield")
+                        .font(.appUI(size: 10)).accessibilityHidden(true)
+                }
+                Text(speechStatus).font(.appUI(size: 10))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("recorder.memo.speech.status")
+                Spacer(minLength: 0)
+                if speech.needsModelDownload, !speech.isPreparing {
+                    speechButton("下载普通话模型", action: speech.downloadModel)
+                } else if !speech.isEnabled, !speech.statusText.isEmpty, speech.isSupported,
+                          !speech.isPreparing, !store.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    speechButton("重试语音跟读", action: speech.toggle)
+                }
+            }
+            .foregroundStyle(RecorderStyle.muted)
+        }
+    }
+
+    private func speechButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(appLocalized(title)).font(.appUI(size: 10))
+                .padding(.horizontal, 8).padding(.vertical, 5)
+        }
+        .buttonStyle(RecorderButtonStyle())
+    }
+
+    private var speechStatus: String {
+        if !speech.isSupported {
+            if #available(macOS 26.0, *) { return appLocalized("此设备不支持本机语音识别") }
+            return appLocalized("需要 macOS 26 或更高版本")
+        }
+        if !speech.statusText.isEmpty { return speech.statusText }
+        if store.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return appLocalized("请先写下文稿") }
+        return appLocalized("仅在本机识别")
     }
 
     private func fontButton(_ symbol: String, title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
@@ -312,6 +572,11 @@ private struct RecorderMemoView: View {
 
     private func modeButton(editing: Bool, title: String) -> some View {
         Button {
+            if editing {
+                speech.stop()
+                showsCompactSettings = false
+                store.setCompact(false)
+            }
             store.isEditing = editing
             store.save()
         } label: {
@@ -326,88 +591,89 @@ private struct RecorderMemoView: View {
     }
 }
 
-/// NSTextView supplies IME, plain-text paste, native undo and smooth scrolling.
-/// Updating settings never replaces text or selection during marked-text input.
-private struct RecorderMemoTextView: NSViewRepresentable {
-    @Binding var text: String
-    let fontSize: Double
-    let isEditing: Bool
+/// Also used by hosted tests: window limits follow the presentation rather
+/// than the size of the scrollable manuscript.
+private struct RecorderMemoWindowConfiguration: NSViewRepresentable {
+    let isCompact: Bool
 
-    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
-    func makeNSView(context: Context) -> NSScrollView {
-        let scroll = MemoScrollView()
-        scroll.drawsBackground = false
-        scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true
-        scroll.borderType = .noBorder
-        let view = NSTextView(frame: .zero)
-        view.drawsBackground = false
-        view.isRichText = false
-        view.allowsUndo = true
-        view.isAutomaticQuoteSubstitutionEnabled = false
-        view.isAutomaticDashSubstitutionEnabled = false
-        view.textContainerInset = NSSize(width: 14, height: 14)
-        view.isVerticallyResizable = true
-        view.isHorizontallyResizable = false
-        view.autoresizingMask = [.width]
-        view.textContainer?.widthTracksTextView = true
-        view.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
-        view.minSize = .zero
-        view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        view.textColor = NSColor(RecorderStyle.ink)
-        view.insertionPointColor = NSColor(RecorderStyle.ink)
-        view.focusRingType = .none
-        view.setAccessibilityLabel(appLocalized("备忘录文稿"))
-        view.string = text
-        view.delegate = context.coordinator
-        scroll.documentView = view
-        return scroll
-    }
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
-        context.coordinator.text = $text
-        guard let view = scroll.documentView as? NSTextView else { return }
-        view.isEditable = isEditing
-        view.isSelectable = true
-        if view.string != text, !view.hasMarkedText() { view.string = text }
-        if view.font?.pointSize != CGFloat(fontSize) {
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.lineSpacing = fontSize * 0.35
-            paragraph.paragraphSpacing = fontSize * 0.5
-            view.font = .systemFont(ofSize: fontSize)
-            view.defaultParagraphStyle = paragraph
-            view.textStorage?.addAttribute(.paragraphStyle, value: paragraph,
-                range: NSRange(location: 0, length: (view.string as NSString).length))
-        }
-    }
-    @MainActor final class Coordinator: NSObject, NSTextViewDelegate {
-        var text: Binding<String>
-        init(text: Binding<String>) { self.text = text }
-        func textDidChange(_ notification: Notification) {
-            guard let view = notification.object as? NSTextView else { return }
-            text.wrappedValue = view.string
-        }
-    }
+    func makeNSView(context: Context) -> ConfigurationView { ConfigurationView() }
+    func updateNSView(_ view: ConfigurationView, context: Context) { view.isCompact = isCompact }
+    static func dismantleNSView(_ view: ConfigurationView, coordinator: ()) { view.teardown() }
 
-    final class MemoScrollView: NSScrollView {
-        override func layout() {
-            super.layout()
-            guard let view = documentView as? NSTextView else { return }
-            let viewport = contentSize
-            if view.frame.width != viewport.width || view.minSize.height != viewport.height {
-                view.minSize = NSSize(width: 0, height: viewport.height)
-                view.setFrameSize(NSSize(width: viewport.width, height: max(view.frame.height, viewport.height)))
+    final class ConfigurationView: NSView {
+        private weak var constrainedContent: NSView?
+        private var sizeConstraints: [NSLayoutConstraint] = []
+        private var sizingObservers: [NSObjectProtocol] = []
+        var isCompact = false {
+            didSet { if oldValue != isCompact { apply() } }
+        }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            setAccessibilityHidden(true)
+            removeObservers()
+            guard let window else { removeConstraints(); return }
+            for (name, object) in [(NSWindow.didChangeScreenNotification, window as AnyObject?),
+                                   (NSApplication.didChangeScreenParametersNotification, nil)] {
+                sizingObservers.append(NotificationCenter.default.addObserver(forName: name,
+                    object: object, queue: .main) { [weak self] _ in
+                        MainActor.assumeIsolated { self?.apply() }
+                    })
             }
+            apply()
+        }
+        private func apply() {
+            guard let window, let content = window.contentView else { return }
+            let frame = window.frame
+            let limits = RecorderMemoController.sizingLimits(for: window, isCompact: isCompact)
+            if constrainedContent !== content {
+                removeConstraints()
+                constrainedContent = content
+                // NSWindow's min/max properties are ignored under Auto Layout.
+                // Native constraints keep the limits independent of manuscript
+                // length and SwiftUI's ideal size calculations.
+                sizeConstraints = [
+                    content.widthAnchor.constraint(greaterThanOrEqualToConstant: limits.minimum.width),
+                    content.heightAnchor.constraint(greaterThanOrEqualToConstant: limits.minimum.height),
+                    content.widthAnchor.constraint(lessThanOrEqualToConstant: limits.maximum.width),
+                    content.heightAnchor.constraint(lessThanOrEqualToConstant: limits.maximum.height)
+                ]
+                NSLayoutConstraint.activate(sizeConstraints)
+            } else {
+                let values = [limits.minimum.width, limits.minimum.height, limits.maximum.width, limits.maximum.height]
+                for (constraint, value) in zip(sizeConstraints, values) where constraint.constant != value {
+                    constraint.constant = value
+                }
+            }
+            RecorderMemoController.applyWindowSizing(window, isCompact: isCompact, proposedFrame: frame)
+        }
+        private func removeConstraints() {
+            NSLayoutConstraint.deactivate(sizeConstraints)
+            sizeConstraints = []
+            constrainedContent = nil
+        }
+        private func removeObservers() {
+            for observer in sizingObservers { NotificationCenter.default.removeObserver(observer) }
+            sizingObservers = []
+        }
+        func teardown() {
+            removeObservers()
+            removeConstraints()
         }
     }
 }
 
 private struct RecorderMemoWindowHandle: NSViewRepresentable {
     let resizes: Bool
+    var isCompact = false
     func makeNSView(context: Context) -> Handle { Handle() }
-    func updateNSView(_ view: Handle, context: Context) { view.resizes = resizes }
+    func updateNSView(_ view: Handle, context: Context) {
+        view.resizes = resizes
+        view.isCompact = isCompact
+    }
 
     final class Handle: NSView {
         var resizes = false
+        var isCompact = false
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
         override func mouseDown(with event: NSEvent) {
             guard let window else { return }
@@ -418,12 +684,13 @@ private struct RecorderMemoWindowHandle: NSViewRepresentable {
             }
             let start = NSEvent.mouseLocation
             let frame = window.frame
+            let limits = RecorderMemoController.sizingLimits(for: window, isCompact: isCompact)
             // Native event tracking ends on mouse-up; no display link or timer.
             while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
                 if next.type == .leftMouseUp { break }
                 let point = NSEvent.mouseLocation
-                let width = min(max(frame.width + point.x - start.x, window.contentMinSize.width), window.contentMaxSize.width)
-                let height = min(max(frame.height + start.y - point.y, window.contentMinSize.height), window.contentMaxSize.height)
+                let width = min(max(frame.width + point.x - start.x, limits.minimum.width), limits.maximum.width)
+                let height = min(max(frame.height + start.y - point.y, limits.minimum.height), limits.maximum.height)
                 window.setFrame(NSRect(x: frame.minX, y: frame.maxY - height, width: width, height: height), display: true)
             }
             window.delegate?.windowDidEndLiveResize?(Notification(name: NSWindow.didEndLiveResizeNotification, object: window))
