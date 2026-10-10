@@ -14,6 +14,22 @@ final class ScriptIndexTests: XCTestCase {
         XCTAssertNil(ScriptIndex(text: " \n ").sentenceRange(atUTF16Offset: 0))
     }
 
+    func testUnpunctuatedLinesUseOriginalRangesAcrossLineEndings() {
+        let phrases = ["第一行👩🏽‍💻没有句号", "第二行含 2.50 与 GPU", "最后一行"]
+        for separator in ["\n", "\r", "\r\n", "\u{85}", "\u{2028}", "\u{2029}"] {
+            let text = " \t\(phrases[0])\(separator)\(separator) \t\(phrases[1])\(separator)\(phrases[2]) "
+            let index = ScriptIndex(text: text)
+            XCTAssertEqual(index.text, text)
+            for phrase in phrases {
+                let range = (text as NSString).range(of: phrase)
+                XCTAssertEqual(index.sentenceRange(atUTF16Offset: range.location), range,
+                    "Line ending: \(separator.debugDescription)")
+                XCTAssertEqual(index.sentenceRange(atUTF16Offset: NSMaxRange(range) - 1), range,
+                    "Line ending: \(separator.debugDescription)")
+            }
+        }
+    }
+
     func testCommonNumbersHaveEquivalentUnitsWithOriginalRanges() {
         let pairs = [("2026", "二零二六"), ("120", "一百二十"), ("2.50", "二点五"),
                      ("3%", "百分之三"), ("６", "六"), ("120000000", "一亿二千万"),
