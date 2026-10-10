@@ -189,6 +189,331 @@ final class RecorderMemoUITests: XCTestCase {
         XCTAssertEqual(textView.string, "简短的备忘录")
     }
 
+    func testBlankLineFoldingKeepsOriginalCopySelectionAndUndo() throws {
+        let original = "开场说明。\n\n \t\u{3000}\r\n第二段内容。\r\n\r\n第三段。"
+        let fixture = makeFixture(original)
+        let undo = fixture.view.testUndoManager
+        undo.beginUndoGrouping()
+        fixture.view.insertText("!", replacementRange: NSRange(location: 0, length: 0))
+        undo.endUndoGrouping()
+        XCTAssertTrue(undo.canUndo)
+        let source = fixture.view.string
+        applyMemoParagraphStyle(to: fixture.view)
+        fixture.layout.ensureLayout(for: fixture.container)
+        let originalHeight = fixture.layout.usedRect(for: fixture.container).height
+        let originalAttributes = try XCTUnwrap(fixture.view.textStorage?.copy() as? NSAttributedString)
+        let selection = NSRange(location: 0, length: (source as NSString).length)
+        fixture.view.setSelectedRange(selection)
+
+        fixture.coordinator.blankLineLayout.update(text: source, isEnabled: true, layoutManager: fixture.layout)
+        fixture.layout.ensureLayout(for: fixture.container)
+        XCTAssertLessThan(fixture.layout.usedRect(for: fixture.container).height, originalHeight)
+        XCTAssertEqual(fixture.view.string, source)
+        XCTAssertEqual(fixture.view.selectedRange(), selection)
+        XCTAssertTrue(try XCTUnwrap(fixture.view.textStorage).isEqual(to: originalAttributes))
+
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("DogSC.BlankLinesTests.\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        XCTAssertTrue(fixture.view.writeSelection(to: pasteboard, types: fixture.view.writablePasteboardTypes))
+        XCTAssertEqual(pasteboard.string(forType: .string), source,
+            "Native copy must include the source blank lines and CRLF separators.")
+
+        fixture.coordinator.blankLineLayout.update(text: source, isEnabled: false, layoutManager: fixture.layout)
+        fixture.layout.ensureLayout(for: fixture.container)
+        XCTAssertEqual(fixture.layout.usedRect(for: fixture.container).height, originalHeight, accuracy: 0.5)
+        XCTAssertEqual(fixture.view.selectedRange(), selection)
+        XCTAssertTrue(undo.canUndo)
+        undo.undo()
+        XCTAssertEqual(fixture.view.string, original, "Display folding must leave native undo intact.")
+    }
+
+    func testBlankParagraphsCollapseWithoutRemovingOrdinaryLFOrCRLFLineBreaks() {
+        for separator in ["\n", "\r\n"] {
+            let ordinary = makeFixture("第一段" + separator + "第二段")
+            let source = "第一段" + separator + separator + " \t\u{3000}" + separator + "第二段"
+            let folded = makeFixture(source)
+            for fixture in [ordinary, folded] { applyMemoParagraphStyle(to: fixture.view) }
+            folded.coordinator.blankLineLayout.update(text: source, isEnabled: true, layoutManager: folded.layout)
+            for fixture in [ordinary, folded] { fixture.layout.ensureLayout(for: fixture.container) }
+            let first = lineRect(for: "第一段", fixture: folded)
+            let second = lineRect(for: "第二段", fixture: folded)
+            XCTAssertGreaterThan(first.height, 0)
+            XCTAssertGreaterThan(second.minY, first.minY, "An ordinary newline must remain visible.")
+            XCTAssertEqual(second.minY, lineRect(for: "第二段", fixture: ordinary).minY, accuracy: 0.5)
+            XCTAssertEqual(folded.layout.usedRect(for: folded.container).height,
+                ordinary.layout.usedRect(for: ordinary.container).height, accuracy: 0.5)
+            XCTAssertEqual(folded.view.string, source)
+        }
+    }
+
+    func testLeadingTrailingAndWrappedWhitespaceParagraphsDoNotAccumulateHeight() {
+        let body = "保留这一行"
+        let ordinary = makeFixture(body + "\n")
+        applyMemoParagraphStyle(to: ordinary.view)
+        ordinary.layout.ensureLayout(for: ordinary.container)
+        let expectedHeight = ordinary.layout.usedRect(for: ordinary.container).height
+        let whitespace = String(repeating: " \t\u{3000}", count: 300)
+        let source = "\n \t\r\n" + whitespace + "\n" + body + "\r\n\n\r\n" + whitespace + "\n\n"
+        let folded = makeFixture(source)
+        applyMemoParagraphStyle(to: folded.view)
+        folded.coordinator.blankLineLayout.update(text: source, isEnabled: true, layoutManager: folded.layout)
+        folded.layout.ensureLayout(for: folded.container)
+        XCTAssertEqual(lineRect(for: body, fixture: folded).minY, 0, accuracy: 0.5)
+        XCTAssertEqual(folded.layout.usedRect(for: folded.container).height, expectedHeight, accuracy: 0.5)
+        XCTAssertEqual(folded.view.string, source)
+
+        let allBlankSource = "\n\r\n \t\u{3000}\r\n" + whitespace + "\n\n"
+        let allBlank = makeFixture(allBlankSource)
+        applyMemoParagraphStyle(to: allBlank.view)
+        allBlank.coordinator.blankLineLayout.update(text: allBlankSource, isEnabled: true, layoutManager: allBlank.layout)
+        allBlank.scroll.needsLayout = true
+        allBlank.scroll.layoutSubtreeIfNeeded()
+        XCTAssertLessThanOrEqual(allBlank.layout.usedRect(for: allBlank.container).height,
+            allBlank.layout.extraLineFragmentRect.height + 0.5,
+            "Only TextKit's normal final caret-line allowance may remain for an all-blank manuscript.")
+        XCTAssertEqual(allBlank.view.frame.height, allBlank.scroll.contentView.bounds.height, accuracy: 1)
+        XCTAssertEqual(allBlank.view.string, allBlankSource)
+    }
+
+    func testFoldedLayoutStillHighlightsAndFollowsOriginalUTF16Ranges() async throws {
+        let source = String(repeating: "前面保持普通段落的朗读内容。\n\n \t\u{3000}\r\n", count: 40) + "末段👩🏽‍💻的朗读位置。"
+        let fixture = makeFixture(source)
+        applyMemoParagraphStyle(to: fixture.view)
+        fixture.layout.ensureLayout(for: fixture.container)
+        let expandedHeight = fixture.layout.usedRect(for: fixture.container).height
+        let sourceRange = (source as NSString).range(of: "末段👩🏽‍💻的朗读位置。")
+        fixture.coordinator.updateHighlight(sourceRange, in: fixture.view)
+        let selection = NSRange(location: 2, length: 4)
+        fixture.view.setSelectedRange(selection)
+
+        fixture.coordinator.blankLineLayout.update(text: source, isEnabled: true, layoutManager: fixture.layout)
+        fixture.scroll.needsLayout = true
+        fixture.scroll.layoutSubtreeIfNeeded()
+        XCTAssertLessThan(fixture.layout.usedRect(for: fixture.container).height, expandedHeight)
+        fixture.coordinator.follow(sourceRange, in: fixture.view, scroll: fixture.scroll)
+        defer { fixture.coordinator.cancelScrollAnimation() }
+        try await Task.sleep(for: .milliseconds(420))
+        XCTAssertEqual(fixture.scroll.contentView.bounds.origin.y,
+            expectedTailScrollOrigin(sourceRange, fixture: fixture), accuracy: 1)
+        var highlighted = NSRange(location: NSNotFound, length: 0)
+        XCTAssertNotNil(fixture.layout.temporaryAttribute(.backgroundColor,
+            atCharacterIndex: sourceRange.location, effectiveRange: &highlighted))
+        XCTAssertEqual(highlighted, sourceRange)
+        XCTAssertEqual(fixture.view.selectedRange(), selection)
+        XCTAssertEqual(fixture.view.string, source)
+    }
+
+    func testHostedBlankLinePreferenceFoldsInReadingRestoresEditingAndPersistsOriginal() async throws {
+        let fixture = try makeHostedFixture()
+        defer { fixture.dispose() }
+        let source = String(repeating: "保留段落正文与普通换行。\r\n\r\n \t\u{3000}\n\n", count: 30) + "最后一段。"
+        fixture.store.text = source
+        fixture.store.isEditing = false
+        fixture.panel.setFrame(NSRect(x: 100, y: 100, width: 300, height: 360), display: false)
+        await settleLayout(fixture.panel)
+        let host = try XCTUnwrap(fixture.panel.contentViewController?.view)
+        let scroll = try XCTUnwrap(findMemoScrollView(in: host))
+        let view = try XCTUnwrap(scroll.documentView as? NSTextView)
+        let layout = try XCTUnwrap(view.layoutManager)
+        let container = try XCTUnwrap(view.textContainer)
+        let expandedHeight = layout.usedRect(for: container).height
+        let selection = NSRange(location: 0, length: 4)
+        view.setSelectedRange(selection)
+        XCTAssertFalse(fixture.store.hidesBlankLines)
+
+        fixture.store.hidesBlankLines = true
+        await settleLayout(fixture.panel)
+        let foldedHeight = layout.usedRect(for: container).height
+        XCTAssertLessThan(foldedHeight, expandedHeight)
+        XCTAssertGreaterThan(view.frame.height, scroll.contentView.bounds.height)
+        XCTAssertGreaterThan(scroll.contentView.bounds.height, 60,
+            "The full footer, toggle, and manuscript viewport must remain usable at the minimum width.")
+        XCTAssertEqual(view.selectedRange(), selection)
+        XCTAssertEqual(view.string, source)
+
+        fixture.store.isEditing = true
+        await settleLayout(fixture.panel)
+        XCTAssertTrue(view.isEditable)
+        XCTAssertTrue(fixture.store.hidesBlankLines, "Editing should preserve the reader's folding preference.")
+        XCTAssertEqual(layout.usedRect(for: container).height, expandedHeight, accuracy: 1)
+        XCTAssertEqual(view.string, source)
+
+        fixture.store.isEditing = false
+        await settleLayout(fixture.panel)
+        XCTAssertFalse(view.isEditable)
+        XCTAssertEqual(layout.usedRect(for: container).height, foldedHeight, accuracy: 1)
+        fixture.store.hidesBlankLines = false
+        await settleLayout(fixture.panel)
+        XCTAssertEqual(layout.usedRect(for: container).height, expandedHeight, accuracy: 1)
+        XCTAssertEqual(fixture.panel.frame.size, NSSize(width: 300, height: 360))
+
+        fixture.store.hidesBlankLines = true
+        fixture.store.save()
+        let restored = RecorderMemoStore(defaults: fixture.defaults)
+        XCTAssertTrue(restored.hidesBlankLines)
+        XCTAssertEqual(restored.text, source, "Persistence must retain all source blanks and CRLF characters.")
+    }
+
+    func testHostedCompactModeKeepsTextViewSelectionAndHighlightWhileExpandingViewport() async throws {
+        let fixture = try makeHostedFixture()
+        defer { fixture.dispose() }
+        let source = String(repeating: "前面的口播稿段落。\r\n\r\n", count: 25) + "中间👩🏽‍💻的朗读位置。\n继续保持原稿。"
+        fixture.store.text = source
+        fixture.store.isEditing = false
+        shrink(fixture.panel, to: 420)
+        await settleLayout(fixture.panel)
+        let host = try XCTUnwrap(fixture.panel.contentViewController?.view)
+        let scroll = try XCTUnwrap(findMemoScrollView(in: host))
+        let view = try XCTUnwrap(scroll.documentView as? NSTextView)
+        let range = (source as NSString).range(of: "中间👩🏽‍💻的朗读位置。")
+        view.setSelectedRange(range)
+        view.layoutManager?.addTemporaryAttribute(.backgroundColor, value: NSColor.systemGreen,
+            forCharacterRange: range)
+        let fullViewportHeight = scroll.contentView.bounds.height
+        let fullFrame = fixture.panel.frame
+
+        fixture.store.setCompact(true)
+        await settleLayout(fixture.panel)
+        let compactScroll = try XCTUnwrap(findMemoScrollView(in: host))
+        let compactView = try XCTUnwrap(compactScroll.documentView as? NSTextView)
+        XCTAssertTrue(compactView === view, "Changing chrome must retain the native text editor and its selection/undo state.")
+        XCTAssertEqual(fixture.panel.frame, fullFrame, "Switching a sufficiently large window should preserve its frame.")
+        XCTAssertGreaterThan(compactScroll.contentView.bounds.height, fullViewportHeight + 120)
+        XCTAssertFalse(fixture.store.isEditing)
+        XCTAssertFalse(compactView.isEditable)
+        XCTAssertEqual(compactView.selectedRange(), range)
+        XCTAssertEqual(compactView.string, source)
+        var highlighted = NSRange(location: NSNotFound, length: 0)
+        XCTAssertNotNil(compactView.layoutManager?.temporaryAttribute(.backgroundColor,
+            atCharacterIndex: range.location, effectiveRange: &highlighted))
+        XCTAssertEqual(highlighted, range, "A display mode change must retain source UTF-16 highlight positions.")
+        let color = try XCTUnwrap(compactView.textColor?.usingColorSpace(.deviceRGB))
+        XCTAssertGreaterThanOrEqual(color.redComponent, 0.9)
+        XCTAssertGreaterThanOrEqual(color.greenComponent, 0.9)
+        XCTAssertGreaterThanOrEqual(color.blueComponent, 0.9)
+
+        fixture.store.setCompact(false)
+        await settleLayout(fixture.panel)
+        let restoredScroll = try XCTUnwrap(findMemoScrollView(in: host))
+        XCTAssertTrue(restoredScroll.documentView === view)
+        XCTAssertFalse(fixture.store.isEditing, "Leaving compact mode should keep reading mode.")
+        XCTAssertEqual(restoredScroll.contentView.bounds.height, fullViewportHeight, accuracy: 1)
+        XCTAssertEqual(view.selectedRange(), range)
+        XCTAssertEqual(view.string, source)
+        XCTAssertNotNil(view.layoutManager?.temporaryAttribute(.backgroundColor,
+            atCharacterIndex: range.location, effectiveRange: nil))
+    }
+
+    func testHostedCompactWindowCanShrinkTo140AndRestoresFullMinimumAtSameTopEdge() async throws {
+        let fixture = try makeHostedFixture()
+        defer { fixture.dispose() }
+        let source = String(repeating: "提词窗口变小仍应保留完整原稿。\n\n", count: 30)
+        fixture.store.text = source
+        fixture.store.setCompact(true)
+        await settleLayout(fixture.panel)
+        let host = try XCTUnwrap(fixture.panel.contentViewController?.view)
+        let view = try XCTUnwrap(findMemoScrollView(in: host)?.documentView as? NSTextView)
+        let top = fixture.panel.frame.maxY
+        // NSWindow's minSize getters are ignored under Auto Layout. Exercise
+        // a real resize attempt below both required native constraints instead.
+        fixture.panel.setFrame(NSRect(x: fixture.panel.frame.minX, y: top - 80, width: 180, height: 80), display: false)
+        await settleLayout(fixture.panel)
+        XCTAssertEqual(fixture.panel.frame.size, NSSize(width: 240, height: 140))
+        XCTAssertEqual(fixture.panel.frame.maxY, top, accuracy: 1)
+        let compactScroll = try XCTUnwrap(findMemoScrollView(in: host))
+        XCTAssertGreaterThan(compactScroll.contentView.bounds.height, 90,
+            "The minimum compact panel should reserve almost all of its height for the manuscript.")
+        XCTAssertGreaterThan(view.frame.height, compactScroll.contentView.bounds.height)
+        XCTAssertEqual(view.string, source)
+
+        fixture.store.setCompact(false)
+        await settleLayout(fixture.panel)
+        XCTAssertGreaterThanOrEqual(fixture.panel.frame.width, 300)
+        XCTAssertGreaterThanOrEqual(fixture.panel.frame.height, 340)
+        XCTAssertEqual(fixture.panel.frame.maxY, top, accuracy: 1,
+            "Returning to full mode should grow downward instead of moving the top edge.")
+        fixture.panel.setFrame(NSRect(x: fixture.panel.frame.minX, y: top - 180, width: 200, height: 180), display: false)
+        await settleLayout(fixture.panel)
+        XCTAssertEqual(fixture.panel.frame.size, NSSize(width: 300, height: 340),
+            "A full-mode resize attempt below its minimum must be clamped by the actual window constraints.")
+        XCTAssertEqual(fixture.panel.frame.maxY, top, accuracy: 1)
+        XCTAssertTrue(findMemoScrollView(in: host)?.documentView === view)
+        XCTAssertEqual(fixture.store.text, source)
+        XCTAssertEqual(view.string, source)
+    }
+
+    func testHostedCompactOpacityZeroProducesTransparentTextBackdrop() async throws {
+        let fixture = try makeHostedFixture()
+        defer { fixture.dispose() }
+        let source = "透明提词"
+        fixture.store.text = source
+        fixture.store.setCompact(true)
+        fixture.store.compactOpacity = 0.2
+        shrink(fixture.panel, to: 180)
+        await settleLayout(fixture.panel)
+        let host = try XCTUnwrap(fixture.panel.contentViewController?.view)
+        let view = try XCTUnwrap(findMemoScrollView(in: host)?.documentView as? NSTextView)
+        let initialAlpha = try backgroundAlpha(in: host)
+        XCTAssertGreaterThan(initialAlpha, 0.05,
+            "The initial compact background must be visible so this snapshot check can detect transparency.")
+
+        fixture.store.compactOpacity = 0
+        await settleLayout(fixture.panel)
+        XCTAssertLessThanOrEqual(try backgroundAlpha(in: host), 0.01,
+            "Zero opacity should leave the manuscript background transparent.")
+        XCTAssertFalse(view.drawsBackground)
+        XCTAssertFalse(try XCTUnwrap(findMemoScrollView(in: host)).drawsBackground)
+        XCTAssertEqual(view.string, source)
+        XCTAssertTrue(findMemoScrollView(in: host)?.documentView === view)
+    }
+
+    func testCompactPreferencesPersistWithOriginalManuscriptAndBothOpacityEdges() throws {
+        let fixture = try makeHostedFixture()
+        defer { fixture.dispose() }
+        XCTAssertFalse(fixture.store.isCompact)
+        XCTAssertEqual(fixture.store.compactOpacity, 0.2, accuracy: 0.001)
+        let source = "原稿👩🏽‍💻\r\n\r\n \t\u{3000}\n完整保留。"
+        fixture.store.text = source
+        fixture.store.setCompact(true)
+        fixture.store.compactOpacity = 0
+        fixture.store.save()
+        let restored = RecorderMemoStore(defaults: fixture.defaults)
+        XCTAssertTrue(restored.isCompact)
+        XCTAssertEqual(restored.compactOpacity, 0, accuracy: 0.001)
+        XCTAssertFalse(restored.isEditing)
+        XCTAssertEqual(restored.text, source)
+
+        fixture.store.setCompact(false)
+        fixture.store.compactOpacity = 1
+        fixture.store.save()
+        let restoredFull = RecorderMemoStore(defaults: fixture.defaults)
+        XCTAssertFalse(restoredFull.isCompact)
+        XCTAssertFalse(fixture.store.isEditing)
+        XCTAssertEqual(restoredFull.compactOpacity, 1, accuracy: 0.001)
+        XCTAssertEqual(restoredFull.text, source)
+    }
+
+    private func backgroundAlpha(in view: NSView) throws -> CGFloat {
+        let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        return try XCTUnwrap(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)).alphaComponent
+    }
+
+    private func applyMemoParagraphStyle(to view: NSTextView) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 22 * 0.35
+        paragraph.paragraphSpacing = 22 * 0.5
+        view.defaultParagraphStyle = paragraph
+        view.textStorage?.addAttribute(.paragraphStyle, value: paragraph,
+            range: NSRange(location: 0, length: (view.string as NSString).length))
+    }
+
+    private func lineRect(for text: String, fixture: Fixture) -> NSRect {
+        let range = (fixture.view.string as NSString).range(of: text)
+        let glyphs = fixture.layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        return fixture.layout.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+    }
+
     private func makeHostedFixture() throws -> HostedFixture {
         _ = NSApplication.shared
         let domain = "DogSC.RecorderMemoUITests.\(UUID().uuidString)"
@@ -198,6 +523,8 @@ final class RecorderMemoUITests: XCTestCase {
         let panel = NSPanel(contentRect: NSRect(x: 100, y: 100, width: 390, height: 890),
             styleMask: [.borderless, .nonactivatingPanel, .resizable], backing: .buffered, defer: false)
         panel.isReleasedWhenClosed = false
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
         panel.contentMinSize = NSSize(width: 300, height: 340)
         panel.contentMaxSize = NSSize(width: 760, height: 1000)
         // Exercise the production NSHostingController and the full memo VStack,

@@ -92,7 +92,8 @@ public struct ScriptIndex: Sendable {
             let decimalPoint = value == "." && position > 0 && position + 1 < elements.count
                 && ScriptNormalizer.isDigit(elements[position - 1].value)
                 && ScriptNormalizer.isDigit(elements[position + 1].value)
-            if "。！？!?；;\n\r".contains(value) || (value == "." && !decimalPoint) {
+            let isNewline = value.unicodeScalars.contains { CharacterSet.newlines.contains($0) }
+            if isNewline || "。！？!?；;".contains(value) || (value == "." && !decimalPoint) {
                 append(through: position)
             }
         }

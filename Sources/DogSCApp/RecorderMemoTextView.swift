@@ -7,6 +7,8 @@ struct RecorderMemoTextView: NSViewRepresentable {
     @Binding var text: String
     let fontSize: Double
     let isEditing: Bool
+    var isCompact = false
+    var hidesBlankLines = false
     let highlightedRange: NSRange?
     let scrollTargetRange: NSRange?
     let followRevision: UInt64
@@ -60,6 +62,16 @@ struct RecorderMemoTextView: NSViewRepresentable {
         defer { context.coordinator.isApplyingViewUpdate = false }
         view.isEditable = isEditing
         view.isSelectable = true
+        let textColor = isCompact ? NSColor.white : NSColor(RecorderStyle.ink)
+        if view.textColor != textColor { view.textColor = textColor }
+        view.insertionPointColor = textColor
+        (scroll as? MemoScrollView)?.usesTransparentScroller = isCompact
+        scroll.scrollerKnobStyle = isCompact ? .light : .default
+        let inset = NSSize(width: isCompact ? 8 : 14, height: isCompact ? 8 : 14)
+        if view.textContainerInset != inset {
+            view.textContainerInset = inset
+            scroll.needsLayout = true
+        }
         if view.string != text, !view.hasMarkedText() { view.string = text }
         if view.font?.pointSize != CGFloat(fontSize), !view.hasMarkedText() {
             let paragraph = NSMutableParagraphStyle()
@@ -70,8 +82,17 @@ struct RecorderMemoTextView: NSViewRepresentable {
             view.textStorage?.addAttribute(.paragraphStyle, value: paragraph,
                 range: NSRange(location: 0, length: (view.string as NSString).length))
         }
+        let blankLinesChanged = view.layoutManager.map {
+            context.coordinator.blankLineLayout.update(text: view.string,
+                isEnabled: hidesBlankLines && !isEditing, layoutManager: $0)
+        } ?? false
+        if blankLinesChanged {
+            context.coordinator.cancelScrollAnimation()
+            scroll.needsLayout = true
+            scroll.layoutSubtreeIfNeeded()
+        }
         context.coordinator.updateHighlight(isEditing ? nil : highlightedRange, in: view)
-        if context.coordinator.followRevision != followRevision {
+        if context.coordinator.followRevision != followRevision || blankLinesChanged {
             context.coordinator.followRevision = followRevision
             if !isEditing, let scrollTargetRange {
                 context.coordinator.follow(scrollTargetRange, in: view, scroll: scroll)
@@ -83,12 +104,16 @@ struct RecorderMemoTextView: NSViewRepresentable {
     static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
         coordinator.cancelScrollAnimation()
         (scroll as? MemoScrollView)?.onUserScroll = nil
-        (scroll.documentView as? NSTextView)?.delegate = nil
+        if let view = scroll.documentView as? NSTextView {
+            view.delegate = nil
+            view.layoutManager?.delegate = nil
+        }
     }
 
     @MainActor final class Coordinator: NSObject, NSTextViewDelegate {
         var text: Binding<String>
         var selectedRange: Binding<NSRange>
+        let blankLineLayout = MemoBlankLineLayoutDelegate()
         var isApplyingViewUpdate = false
         var followRevision: UInt64 = 0
         private var highlightedRange: NSRange?
@@ -182,6 +207,14 @@ struct RecorderMemoTextView: NSViewRepresentable {
 
     final class MemoScrollView: NSScrollView {
         var onUserScroll: (() -> Void)?
+        var usesTransparentScroller = false {
+            didSet {
+                guard usesTransparentScroller != oldValue else { return }
+                (verticalScroller as? MemoScroller)?.hidesTrack = usesTransparentScroller
+                scrollerStyle = usesTransparentScroller ? .overlay : NSScroller.preferredScrollerStyle
+                needsLayout = true
+            }
+        }
         private var isSizingDocument = false
         private var isTouchScrolling = false
         private var isMomentumScrolling = false
@@ -196,6 +229,14 @@ struct RecorderMemoTextView: NSViewRepresentable {
             NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
         }
 
+        // AppKit reapplies the system preference when input devices or the
+        // "Show scroll bars" setting changes. The transparent reader keeps
+        // overlay scrollers even when that preference is "Always".
+        override var scrollerStyle: NSScroller.Style {
+            get { super.scrollerStyle }
+            set { super.scrollerStyle = usesTransparentScroller ? .overlay : newValue }
+        }
+
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
             let scroller = MemoScroller()
@@ -203,6 +244,10 @@ struct RecorderMemoTextView: NSViewRepresentable {
                 self?.isDraggingScroller = tracking
                 self?.userScrollUntil = ProcessInfo.processInfo.systemUptime + 0.15
                 if tracking { self?.onUserScroll?() }
+            }
+            scroller.onTrackClick = { [weak self] in
+                self?.userScrollUntil = ProcessInfo.processInfo.systemUptime + 0.15
+                self?.onUserScroll?()
             }
             verticalScroller = scroller
         }
@@ -252,10 +297,31 @@ struct RecorderMemoTextView: NSViewRepresentable {
 
     final class MemoScroller: NSScroller {
         var onTracking: ((Bool) -> Void)?
-        override func mouseDown(with event: NSEvent) {
+        var onTrackClick: (() -> Void)?
+        var hidesTrack = false {
+            didSet { if hidesTrack != oldValue { needsDisplay = true } }
+        }
+
+        // Custom scrollers otherwise force AppKit to use an opaque legacy
+        // track. Keep native overlay drawing and parts-based knob tracking.
+        override class var isCompatibleWithOverlayScrollers: Bool { true }
+
+        override func drawKnobSlot(in slotRect: NSRect, highlight flag: Bool) {
+            if !hidesTrack { super.drawKnobSlot(in: slotRect, highlight: flag) }
+        }
+
+        override func testPart(_ point: NSPoint) -> NSScroller.Part {
+            let part = super.testPart(point)
+            if part != .noPart, NSApp.currentEvent?.type == .leftMouseDown {
+                onTrackClick?()
+            }
+            return part
+        }
+
+        override func trackKnob(with event: NSEvent) {
             onTracking?(true)
             defer { onTracking?(false) }
-            super.mouseDown(with: event)
+            super.trackKnob(with: event)
         }
     }
 }
