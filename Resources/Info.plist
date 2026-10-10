@@ -63,7 +63,7 @@
     <key>NSCameraUseContinuityCameraDeviceType</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>用于在录屏中录制麦克风声音。</string>
+    <string>用于在录屏中录制麦克风声音，以及在本机识别朗读以滚动和高亮备忘录。</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSPrincipalClass</key>

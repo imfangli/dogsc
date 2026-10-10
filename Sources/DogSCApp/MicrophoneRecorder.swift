@@ -16,9 +16,12 @@ final class MicrophoneRecorder: NSObject,
     private let levelOutput = AVCaptureAudioDataOutput()
     private let sessionQueue = DispatchQueue(label: "cn.laogou.dogsc.microphone")
     private let sessionQueueKey = DispatchSpecificKey<UInt8>()
+    private var sessionEventMonitor: MicrophoneCaptureSessionEventMonitor?
 
     // sessionQueue-confined state
     private var activity: CaptureActivity = .idle
+    private var monitoringRequestID: UUID?
+    private var liveAudioConsumers: [UUID: LiveAudioConsumer] = [:]
     private var startContinuation: (UUID, CheckedContinuation<Void, any Error>)?
     private var stopContinuations: [UUID: CheckedContinuation<Void, any Error>] = [:]
     private var recordingStartedAtStorage: Date?
@@ -62,6 +65,12 @@ final class MicrophoneRecorder: NSObject,
         super.init()
         sessionQueue.setSpecific(key: sessionQueueKey, value: 1)
         levelOutput.setSampleBufferDelegate(self, queue: sessionQueue)
+        sessionEventMonitor = MicrophoneCaptureSessionEventMonitor(session: session) {
+            [weak self] event in
+            self?.sessionQueue.async { [weak self] in
+                self?.handleSessionEventLocked(event)
+            }
+        }
     }
 
     /// A mid-recording device disconnect (USB microphone pulled) ends the
@@ -135,6 +144,7 @@ final class MicrophoneRecorder: NSObject,
                         guard !cancellation.isCancelled else {
                             throw CancellationError()
                         }
+                        monitoringRequestID = requestID
                         activity = .livePreview(requestID)
                         if !session.isRunning { session.startRunning() }
                         continuation.resume()
@@ -161,6 +171,75 @@ final class MicrophoneRecorder: NSObject,
         }
     }
 
+    /// Subscribers share the existing input during recording, including while
+    /// the file writer is paused. A requested device cannot reconfigure a live
+    /// recording or another subscriber's session.
+    func acquireLiveAudio(deviceUniqueID: String? = nil) async throws -> MicrophoneAudioLease {
+        guard await requestPermission() else {
+            throw MicrophoneRecorderError.permissionDenied
+        }
+        try Task.checkCancellation()
+        let requestID = UUID()
+        let cancellation = CaptureCancellationFlag()
+        return try await withTaskCancellationHandler {
+            let lease = try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<MicrophoneAudioLease, any Error>) in
+                sessionQueue.async { [self] in
+                    guard !cancellation.isCancelled else {
+                        continuation.resume(throwing: CancellationError())
+                        return
+                    }
+                    do {
+                        if !activity.ownsRecordingOutput,
+                           monitoringRequestID == nil,
+                           liveAudioConsumers.isEmpty {
+                            try configureLocked(deviceUniqueID: deviceUniqueID)
+                        }
+                        guard let configuredDeviceUniqueID,
+                              session.inputs.compactMap({ $0 as? AVCaptureDeviceInput })
+                                .contains(where: { $0.device.isConnected }) else {
+                            throw MicrophoneLiveAudioError.deviceDisconnected
+                        }
+                        guard !cancellation.isCancelled else { throw CancellationError() }
+                        let stream = AsyncThrowingStream<MicrophoneAudioSample, any Error>
+                            .makeStream(bufferingPolicy: .bufferingNewest(32))
+                        stream.continuation.onTermination = { [weak self] _ in
+                            self?.sessionQueue.async { [weak self] in
+                                self?.releaseLiveAudioLocked(requestID: requestID)
+                            }
+                        }
+                        liveAudioConsumers[requestID] = LiveAudioConsumer(
+                            continuation: stream.continuation
+                        )
+                        let lease = MicrophoneAudioLease(
+                            samples: stream.stream,
+                            deviceUniqueID: configuredDeviceUniqueID
+                        ) { [self] in
+                            await releaseLiveAudio(requestID: requestID)
+                        }
+                        if !session.isRunning { session.startRunning() }
+                        scheduleLiveAudioTimeoutLocked(requestID: requestID)
+                        continuation.resume(returning: lease)
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+            do {
+                try Task.checkCancellation()
+                return lease
+            } catch {
+                await lease.release()
+                throw error
+            }
+        } onCancel: {
+            cancellation.cancel()
+            sessionQueue.async { [weak self] in
+                self?.releaseLiveAudioLocked(requestID: requestID)
+            }
+        }
+    }
+
     func requestIdleResourceRelease() {
         sessionQueue.async { [self] in releaseIdleResourcesLocked() }
     }
@@ -172,6 +251,7 @@ final class MicrophoneRecorder: NSObject,
     func releaseDisconnectedDevice() async {
         await withCheckedContinuation { continuation in
             sessionQueue.async { [self] in
+                finishLiveAudioConsumersLocked(throwing: MicrophoneLiveAudioError.deviceDisconnected)
                 guard !activity.ownsRecordingOutput else {
                     continuation.resume()
                     return
@@ -196,6 +276,7 @@ final class MicrophoneRecorder: NSObject,
             ?? Self.inputLevel(from: connection.audioChannels)
             ?? 0
         normalizedInputLevelState.withLock { $0 = inputLevel }
+        publishLiveAudioLocked(sampleBuffer)
         guard activity.recordingRequestID != nil else { return }
         do {
             try appendRecordingSampleLocked(sampleBuffer)
@@ -317,6 +398,137 @@ final class MicrophoneRecorder: NSObject,
         }
     }
 
+    private struct LiveAudioConsumer {
+        let continuation: AsyncThrowingStream<MicrophoneAudioSample, any Error>.Continuation
+        var hasReceivedAudio = false
+    }
+
+    private func releaseLiveAudio(requestID: UUID) async {
+        await withCheckedContinuation { continuation in
+            sessionQueue.async { [self] in
+                releaseLiveAudioLocked(requestID: requestID)
+                continuation.resume()
+            }
+        }
+    }
+
+    private func releaseLiveAudioLocked(requestID: UUID) {
+        dispatchPrecondition(condition: .onQueue(sessionQueue))
+        guard let consumer = liveAudioConsumers.removeValue(forKey: requestID) else { return }
+        consumer.continuation.finish()
+        stopSessionIfUnownedLocked()
+    }
+
+    private func publishLiveAudioLocked(_ sampleBuffer: CMSampleBuffer) {
+        dispatchPrecondition(condition: .onQueue(sessionQueue))
+        guard !liveAudioConsumers.isEmpty,
+              sampleBuffer.isValid,
+              CMSampleBufferDataIsReady(sampleBuffer),
+              CMSampleBufferGetNumSamples(sampleBuffer) > 0,
+              let description = CMSampleBufferGetFormatDescription(sampleBuffer),
+              CMAudioFormatDescriptionGetStreamBasicDescription(description)?
+                .pointee.mFormatID == kAudioFormatLinearPCM else { return }
+        let sample = MicrophoneAudioSample(sampleBuffer: sampleBuffer)
+        var terminated: [UUID] = []
+        for (requestID, consumer) in liveAudioConsumers {
+            liveAudioConsumers[requestID]?.hasReceivedAudio = true
+            if case .terminated = consumer.continuation.yield(sample) {
+                terminated.append(requestID)
+            }
+        }
+        for requestID in terminated { releaseLiveAudioLocked(requestID: requestID) }
+    }
+
+    private func finishLiveAudioConsumersLocked(throwing error: any Error) {
+        dispatchPrecondition(condition: .onQueue(sessionQueue))
+        let consumers = Array(liveAudioConsumers.values)
+        liveAudioConsumers.removeAll()
+        for consumer in consumers { consumer.continuation.finish(throwing: error) }
+    }
+
+    private func scheduleLiveAudioTimeoutLocked(requestID: UUID) {
+        sessionQueue.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self,
+                  let consumer = liveAudioConsumers[requestID],
+                  !consumer.hasReceivedAudio else { return }
+            liveAudioConsumers.removeValue(forKey: requestID)
+            consumer.continuation.finish(throwing: MicrophoneLiveAudioError.noAudio)
+            stopSessionIfUnownedLocked()
+        }
+    }
+
+    private func restoreLiveActivityLocked() {
+        dispatchPrecondition(condition: .onQueue(sessionQueue))
+        if let monitoringRequestID {
+            activity = .livePreview(monitoringRequestID)
+        } else {
+            activity = .idle
+        }
+    }
+
+    private func stopSessionIfUnownedLocked() {
+        dispatchPrecondition(condition: .onQueue(sessionQueue))
+        guard !activity.ownsRecordingOutput,
+              monitoringRequestID == nil,
+              liveAudioConsumers.isEmpty else { return }
+        if session.isRunning { session.stopRunning() }
+        resetNormalizedInputLevel()
+    }
+
+    private func handleSessionEventLocked(_ event: MicrophoneCaptureSessionEvent) {
+        dispatchPrecondition(condition: .onQueue(sessionQueue))
+        let error: MicrophoneLiveAudioError
+        switch event {
+        case let .disconnected(uniqueID):
+            guard uniqueID == configuredDeviceUniqueID else { return }
+            error = .deviceDisconnected
+        case let .runtimeError(reason):
+            guard activity.ownsRecordingOutput || monitoringRequestID != nil
+                    || !liveAudioConsumers.isEmpty else { return }
+            error = .captureFailed(reason)
+        }
+        Self.logger.error("microphone session failed: \(error.localizedDescription, privacy: .public)")
+        finishLiveAudioConsumersLocked(throwing: error)
+        monitoringRequestID = nil
+        // Input loss is not an encoder failure. Stop accepting samples but
+        // preserve and finalize the audio already written before the device
+        // disappeared; cancelWriting would remove that useful partial track.
+        if session.isRunning { session.stopRunning() }
+        resetNormalizedInputLevel()
+        finalizeInterruptedRecordingLocked(error)
+        releaseIdleResourcesLocked()
+    }
+
+    private func finalizeInterruptedRecordingLocked(_ error: any Error) {
+        dispatchPrecondition(condition: .onQueue(sessionQueue))
+        switch activity {
+        case let .starting(requestID), let .recording(requestID):
+            let reportsUnexpectedStop = activity.isRecording
+            let failure = error as? MicrophoneRecorderError
+                ?? MicrophoneRecorderError.recordingFailed(error.localizedDescription)
+            guard writerHasSamples, writer?.status == .writing, writerInput != nil else {
+                failRecordingLocked(failure, reportsUnexpectedStop: reportsUnexpectedStop)
+                return
+            }
+            if let pending = startContinuation, pending.0 == requestID {
+                startContinuation = nil
+                pending.1.resume(throwing: failure)
+            }
+            // Copy the handler before an asynchronous finish. AppModel's
+            // handler carries this recording's identity even after a restart.
+            let handler = reportsUnexpectedStop ? unexpectedStopHandler : nil
+            activity = .stopping(requestID)
+            finishWriterLocked(requestID: requestID)
+            if let handler { Task { @MainActor in handler(failure) } }
+        case .stopping:
+            // A disconnect can race an explicit stop. finishWriting is already
+            // in flight and its existing callback/timeout owns completion.
+            return
+        case .idle, .livePreview:
+            return
+        }
+    }
+
     private func configureLocked(deviceUniqueID: String?) throws {
         dispatchPrecondition(condition: .onQueue(sessionQueue))
         let device = try CaptureDeviceCatalog.resolveLiveDevice(
@@ -334,6 +546,12 @@ final class MicrophoneRecorder: NSObject,
             return
         }
 
+        // Changing the recorder's device is an explicit boundary. Speech can
+        // retry against the new input; no old lease silently starts delivering
+        // a different microphone's audio.
+        if configuredDeviceUniqueID != nil {
+            finishLiveAudioConsumersLocked(throwing: MicrophoneLiveAudioError.deviceChanged)
+        }
         if session.isRunning { session.stopRunning() }
         let input = try AVCaptureDeviceInput(device: device)
         configuredDeviceUniqueID = nil
@@ -361,9 +579,8 @@ final class MicrophoneRecorder: NSObject,
         dispatchPrecondition(condition: .onQueue(sessionQueue))
         switch activity {
         case .idle, .livePreview:
-            if session.isRunning { session.stopRunning() }
-            activity = .idle
-            resetNormalizedInputLevel()
+            restoreLiveActivityLocked()
+            stopSessionIfUnownedLocked()
             continuation.resume()
         case let .starting(requestID):
             stopContinuations[waiterID] = continuation
@@ -384,22 +601,23 @@ final class MicrophoneRecorder: NSObject,
 
     private func cancelMonitoringLocked(requestID: UUID) {
         dispatchPrecondition(condition: .onQueue(sessionQueue))
-        guard case let .livePreview(activeRequestID) = activity,
-              activeRequestID == requestID else { return }
+        guard monitoringRequestID == requestID else { return }
         stopLiveMonitoringLocked()
     }
 
     private func stopLiveMonitoringLocked() {
         dispatchPrecondition(condition: .onQueue(sessionQueue))
-        guard case .livePreview = activity else { return }
-        if session.isRunning { session.stopRunning() }
-        activity = .idle
-        resetNormalizedInputLevel()
+        monitoringRequestID = nil
+        if !activity.ownsRecordingOutput { restoreLiveActivityLocked() }
+        stopSessionIfUnownedLocked()
     }
 
     private func releaseIdleResourcesLocked() {
         dispatchPrecondition(condition: .onQueue(sessionQueue))
+        monitoringRequestID = nil
         guard !activity.ownsRecordingOutput else { return }
+        restoreLiveActivityLocked()
+        guard liveAudioConsumers.isEmpty else { return }
         if session.isRunning { session.stopRunning() }
         session.beginConfiguration()
         for input in session.inputs { session.removeInput(input) }
@@ -601,7 +819,9 @@ final class MicrophoneRecorder: NSObject,
         scheduleStopTimeoutLocked(requestID: requestID)
         writer.finishWriting { [weak self] in
             self?.sessionQueue.async { [weak self] in
-                guard let self else { return }
+                guard let self,
+                      case let .stopping(activeRequestID) = self.activity,
+                      activeRequestID == requestID else { return }
                 guard let completedWriter = self.writer else {
                     self.completeStopLocked(
                         requestID: requestID,
@@ -635,14 +855,13 @@ final class MicrophoneRecorder: NSObject,
         dispatchPrecondition(condition: .onQueue(sessionQueue))
         guard case let .stopping(activeRequestID) = activity,
               activeRequestID == requestID else { return }
-        if session.isRunning { session.stopRunning() }
         let pendingStops = Array(stopContinuations.values)
         stopContinuations.removeAll()
         if let completed = currentDiagnosticsLocked() {
             lastCompletedDiagnostics = completed
         }
-        activity = .idle
-        resetNormalizedInputLevel()
+        restoreLiveActivityLocked()
+        stopSessionIfUnownedLocked()
         resetRecordingStateLocked(cancelWriter: false)
         switch result {
         case .success:
@@ -670,9 +889,8 @@ final class MicrophoneRecorder: NSObject,
             lastCompletedDiagnostics = completed
         }
         writer?.cancelWriting()
-        if session.isRunning { session.stopRunning() }
-        activity = .idle
-        resetNormalizedInputLevel()
+        restoreLiveActivityLocked()
+        stopSessionIfUnownedLocked()
         resetRecordingStateLocked(cancelWriter: false)
         guard reportsUnexpectedStop, let handler = unexpectedStopHandler else { return }
         Task { @MainActor in handler(failure) }
@@ -760,8 +978,8 @@ final class MicrophoneRecorder: NSObject,
                     "5 秒内没有收到并写入首个有效音频样本"
                 )
             )
-            activity = .idle
-            if session.isRunning { session.stopRunning() }
+            restoreLiveActivityLocked()
+            stopSessionIfUnownedLocked()
             resetRecordingStateLocked(cancelWriter: true)
         }
     }
@@ -876,5 +1094,43 @@ final class MicrophoneRecorder: NSObject,
     private func syncOnSessionQueue<T>(_ operation: () -> T) -> T {
         if DispatchQueue.getSpecific(key: sessionQueueKey) != nil { return operation() }
         return sessionQueue.sync(execute: operation)
+    }
+}
+
+private enum MicrophoneCaptureSessionEvent: Sendable {
+    case disconnected(String)
+    case runtimeError(String)
+}
+
+/// Speech may own the input even when recording is disabled, so capture errors
+/// must be observed here instead of depending on the toolbar device observer.
+private final class MicrophoneCaptureSessionEventMonitor {
+    private var observers: [NSObjectProtocol] = []
+
+    init(
+        session: AVCaptureSession,
+        handler: @escaping @Sendable (MicrophoneCaptureSessionEvent) -> Void
+    ) {
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(
+            forName: AVCaptureSession.runtimeErrorNotification,
+            object: session,
+            queue: nil
+        ) { notification in
+            let error = notification.userInfo?[AVCaptureSessionErrorKey] as? NSError
+            handler(.runtimeError(error?.localizedDescription ?? "Unknown audio capture error"))
+        })
+        observers.append(center.addObserver(
+            forName: AVCaptureDevice.wasDisconnectedNotification,
+            object: nil,
+            queue: nil
+        ) { notification in
+            guard let device = notification.object as? AVCaptureDevice else { return }
+            handler(.disconnected(device.uniqueID))
+        })
+    }
+
+    deinit {
+        observers.forEach(NotificationCenter.default.removeObserver)
     }
 }

@@ -1,0 +1,311 @@
+import AppKit
+import CoreGraphics
+import SwiftUI
+import XCTest
+@testable import DogSCApp
+
+/// Exercise AppKit text layout and scrolling without opening an OS window or
+/// requesting microphone access. Speech matching itself is tested separately.
+@MainActor
+final class RecorderMemoUITests: XCTestCase {
+    func testUserSelectionIsReportedWithoutChangingTheManuscript() {
+        let manuscript = "先选择这一段，再从选中位置开始跟读。"
+        let fixture = makeFixture(manuscript)
+        var reportedSelection = NSRange(location: 0, length: 0)
+        fixture.coordinator.selectedRange = Binding(get: { reportedSelection }, set: { reportedSelection = $0 })
+        let selection = (manuscript as NSString).range(of: "这一段")
+        fixture.view.setSelectedRange(selection)
+        XCTAssertEqual(reportedSelection, selection,
+            "Selections outside SwiftUI's programmatic update should reach the speech controller.")
+        XCTAssertEqual(fixture.view.string, manuscript)
+    }
+
+    func testTemporaryHighlightPreservesTextSelectionAndUndo() throws {
+        let original = "第一句，正式开始。第二句继续说明。"
+        let fixture = makeFixture(original)
+        let undo = fixture.view.testUndoManager
+        undo.beginUndoGrouping()
+        fixture.view.insertText("!", replacementRange: NSRange(location: 0, length: 0))
+        undo.endUndoGrouping()
+        XCTAssertTrue(undo.canUndo, "Native text editing should register an undo operation.")
+
+        let edited = fixture.view.string
+        let selection = NSRange(location: 3, length: 4)
+        fixture.view.setSelectedRange(selection)
+        let sentence = (edited as NSString).range(of: "第一句，正式开始。")
+        fixture.coordinator.updateHighlight(sentence, in: fixture.view)
+
+        XCTAssertEqual(fixture.view.string, edited)
+        XCTAssertEqual(fixture.view.selectedRange(), selection)
+        XCTAssertTrue(undo.canUndo)
+        XCTAssertNotNil(fixture.layout.temporaryAttribute(.backgroundColor,
+            atCharacterIndex: sentence.location, effectiveRange: nil))
+        XCTAssertNil(fixture.view.textStorage?.attribute(.backgroundColor,
+            at: sentence.location, effectiveRange: nil), "Highlighting must stay out of the text storage.")
+
+        fixture.coordinator.updateHighlight(nil, in: fixture.view)
+        XCTAssertNil(fixture.layout.temporaryAttribute(.backgroundColor,
+            atCharacterIndex: sentence.location, effectiveRange: nil))
+        XCTAssertEqual(fixture.view.selectedRange(), selection)
+        undo.undo()
+        XCTAssertEqual(fixture.view.string, original, "Following speech must not add or replace an undo operation.")
+    }
+
+    func testPartialUTF16RangesHighlightWholeComposedCharacters() throws {
+        let text = "开始👩🏽‍💻然后e\u{301}结束"
+        let fixture = makeFixture(text)
+        let source = text as NSString
+        let emoji = source.range(of: "👩🏽‍💻")
+        let accent = source.range(of: "e\u{301}")
+        let selection = NSRange(location: 0, length: 2)
+        fixture.view.setSelectedRange(selection)
+
+        for whole in [emoji, accent] {
+            fixture.coordinator.updateHighlight(NSRange(location: whole.location + 1, length: 1), in: fixture.view)
+            var effective = NSRange(location: NSNotFound, length: 0)
+            let color = fixture.layout.temporaryAttribute(.backgroundColor,
+                atCharacterIndex: whole.location, effectiveRange: &effective)
+            XCTAssertNotNil(color)
+            XCTAssertEqual(effective, whole)
+            XCTAssertEqual(fixture.view.string, text)
+            XCTAssertEqual(fixture.view.selectedRange(), selection)
+        }
+        XCTAssertNil(fixture.layout.temporaryAttribute(.backgroundColor,
+            atCharacterIndex: emoji.location, effectiveRange: nil), "Moving the highlight should remove the previous one.")
+    }
+
+    func testUnpunctuatedParagraphScrollsToMatchedTailWhileHighlightingWholeSentence() async throws {
+        let text = String(repeating: "语音跟读可以从稿件中间开始并且随着朗读继续滚动", count: 40)
+        let fixture = makeFixture(text)
+        let length = (text as NSString).length
+        let sentence = NSRange(location: 0, length: length)
+        let matched = NSRange(location: length / 2, length: 32)
+        let selection = NSRange(location: 4, length: 2)
+        fixture.view.setSelectedRange(selection)
+        fixture.coordinator.updateHighlight(sentence, in: fixture.view)
+        fixture.coordinator.follow(matched, in: fixture.view, scroll: fixture.scroll)
+        defer { fixture.coordinator.cancelScrollAnimation() }
+        try await Task.sleep(for: .milliseconds(420))
+
+        let expected = expectedTailScrollOrigin(matched, fixture: fixture)
+        XCTAssertGreaterThan(expected, fixture.scroll.contentView.bounds.height,
+            "A mid-paragraph match should advance past the sentence's opening lines.")
+        XCTAssertEqual(fixture.scroll.contentView.bounds.origin.y, expected, accuracy: 1)
+        XCTAssertEqual(fixture.view.string, text)
+        XCTAssertEqual(fixture.view.selectedRange(), selection)
+        var highlighted = NSRange(location: NSNotFound, length: 0)
+        XCTAssertNotNil(fixture.layout.temporaryAttribute(.backgroundColor,
+            atCharacterIndex: 0, effectiveRange: &highlighted))
+        XCTAssertEqual(highlighted, sentence, "Scroll position and sentence highlighting should remain independent.")
+    }
+
+    func testManualWheelCancelsAnimationAndLaterMatchResumesFollowing() async throws {
+        let text = String(repeating: "跳读以后应当找到稿件位置并继续跟随朗读", count: 40)
+        let fixture = makeFixture(text)
+        let length = (text as NSString).length
+        let matched = NSRange(location: length / 2, length: 30)
+        fixture.coordinator.follow(matched, in: fixture.view, scroll: fixture.scroll)
+        defer { fixture.coordinator.cancelScrollAnimation() }
+        try await Task.sleep(for: .milliseconds(50))
+
+        let cgEvent = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+            wheelCount: 1, wheel1: -30, wheel2: 0, wheel3: 0))
+        let event = try XCTUnwrap(NSEvent(cgEvent: cgEvent))
+        fixture.scroll.scrollWheel(with: event)
+        XCTAssertTrue(fixture.scroll.isUserScrolling)
+        let manual = NSPoint(x: 0, y: 45)
+        fixture.scroll.contentView.scroll(to: manual)
+        fixture.scroll.reflectScrolledClipView(fixture.scroll.contentView)
+        let manuallyScrolledY = fixture.scroll.contentView.bounds.origin.y
+        fixture.coordinator.follow(matched, in: fixture.view, scroll: fixture.scroll)
+        try await Task.sleep(for: .milliseconds(220))
+        XCTAssertEqual(fixture.scroll.contentView.bounds.origin.y, manuallyScrolledY, accuracy: 1,
+            "Neither the canceled animation nor a match during a wheel gesture should move the viewport.")
+        XCTAssertFalse(fixture.scroll.isUserScrolling)
+
+        // The same sentence may be matched again after manual scrolling.
+        // A later reliable revision must resume following without a new range.
+        fixture.coordinator.followRevision &+= 1
+        fixture.coordinator.follow(matched, in: fixture.view, scroll: fixture.scroll)
+        try await Task.sleep(for: .milliseconds(420))
+        XCTAssertEqual(fixture.scroll.contentView.bounds.origin.y,
+            expectedTailScrollOrigin(matched, fixture: fixture), accuracy: 1)
+        XCTAssertGreaterThan(fixture.scroll.contentView.bounds.origin.y, manuallyScrolledY + 100)
+    }
+
+    func testHostedMemoCanShrinkAfterPastingLongManuscript() async throws {
+        let fixture = try makeHostedFixture()
+        defer { fixture.dispose() }
+        await settleLayout(fixture.panel)
+        let manuscript = String(repeating: "这是需要完整保留的口播文稿，粘贴后只能让内部文档变长，不应限制备忘录窗口的高度。\n", count: 160)
+        fixture.store.text = manuscript
+        await settleLayout(fixture.panel)
+        let hostView = try XCTUnwrap(fixture.panel.contentViewController?.view)
+        let scroll = try XCTUnwrap(findMemoScrollView(in: hostView))
+        let textView = try XCTUnwrap(scroll.documentView as? NSTextView)
+        XCTAssertEqual(textView.string, manuscript)
+        XCTAssertGreaterThan(textView.frame.height, scroll.contentView.bounds.height * 2)
+        XCTAssertLessThanOrEqual(fixture.panel.contentMinSize.height, 340,
+            "The hosting controller must not promote document height into the panel's minimum height.")
+
+        shrink(fixture.panel, to: 360)
+        await settleLayout(fixture.panel)
+        XCTAssertEqual(fixture.panel.frame.height, 360, accuracy: 1)
+        XCTAssertEqual(fixture.panel.frame.width, 390, accuracy: 1)
+        XCTAssertGreaterThan(scroll.contentView.bounds.height, 70)
+        XCTAssertLessThan(scroll.contentView.bounds.height, 300,
+            "The scroll viewport should shrink with the window while the manuscript remains scrollable.")
+        XCTAssertGreaterThan(textView.frame.height, scroll.contentView.bounds.height * 2)
+        XCTAssertEqual(textView.string, manuscript)
+
+        // Reading mode and the largest font must still fit a user-sized panel.
+        fixture.store.isEditing = false
+        fixture.store.fontSize = 40
+        await settleLayout(fixture.panel)
+        XCTAssertEqual(fixture.panel.frame.height, 360, accuracy: 1)
+        XCTAssertLessThanOrEqual(fixture.panel.contentMinSize.height, 340)
+        XCTAssertEqual(fixture.store.text, manuscript)
+        XCTAssertEqual(textView.string, manuscript)
+    }
+
+    func testHostedShortMemoDocumentDoesNotRetainThePreviousTallViewport() async throws {
+        let fixture = try makeHostedFixture()
+        defer { fixture.dispose() }
+        fixture.store.text = "简短的备忘录"
+        await settleLayout(fixture.panel)
+        let hostView = try XCTUnwrap(fixture.panel.contentViewController?.view)
+        let scroll = try XCTUnwrap(findMemoScrollView(in: hostView))
+        let textView = try XCTUnwrap(scroll.documentView as? NSTextView)
+        let tallViewport = scroll.contentView.bounds.height
+        XCTAssertGreaterThan(tallViewport, 400)
+
+        shrink(fixture.panel, to: 360)
+        await settleLayout(fixture.panel)
+        XCTAssertEqual(fixture.panel.frame.height, 360, accuracy: 1)
+        XCTAssertLessThan(scroll.contentView.bounds.height, tallViewport - 200)
+        XCTAssertEqual(textView.minSize.height, scroll.contentView.bounds.height, accuracy: 1)
+        XCTAssertEqual(textView.frame.height, scroll.contentView.bounds.height, accuracy: 1,
+            "A short document must not keep the height of an earlier larger viewport.")
+        XCTAssertEqual(textView.string, "简短的备忘录")
+    }
+
+    private func makeHostedFixture() throws -> HostedFixture {
+        _ = NSApplication.shared
+        let domain = "DogSC.RecorderMemoUITests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: domain))
+        let store = RecorderMemoStore(defaults: defaults)
+        let speech = RecorderMemoSpeechController()
+        let panel = NSPanel(contentRect: NSRect(x: 100, y: 100, width: 390, height: 890),
+            styleMask: [.borderless, .nonactivatingPanel, .resizable], backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false
+        panel.contentMinSize = NSSize(width: 300, height: 340)
+        panel.contentMaxSize = NSSize(width: 760, height: 1000)
+        // Exercise the production NSHostingController and the full memo VStack,
+        // including the header, speech controls, text viewport, and footer.
+        panel.contentViewController = RecorderMemoController.makeContentViewController(
+            store: store, speech: speech, onClose: {})
+        panel.setFrame(NSRect(x: 100, y: 100, width: 390, height: 890), display: false)
+        return HostedFixture(store: store, panel: panel, defaults: defaults, domain: domain)
+    }
+
+    private func shrink(_ panel: NSPanel, to height: CGFloat) {
+        let frame = panel.frame
+        panel.setFrame(NSRect(x: frame.minX, y: frame.maxY - height, width: frame.width, height: height), display: false)
+    }
+
+    private func settleLayout(_ panel: NSPanel) async {
+        // SwiftUI state propagation and representable frame updates occur on
+        // subsequent main-actor turns even when the NSPanel is never shown.
+        for _ in 0..<3 {
+            panel.contentView?.layoutSubtreeIfNeeded()
+            try? await Task.sleep(for: .milliseconds(40))
+        }
+        panel.contentView?.layoutSubtreeIfNeeded()
+    }
+
+    private func findMemoScrollView(in view: NSView) -> RecorderMemoTextView.MemoScrollView? {
+        if let scroll = view as? RecorderMemoTextView.MemoScrollView { return scroll }
+        for child in view.subviews {
+            if let scroll = findMemoScrollView(in: child) { return scroll }
+        }
+        return nil
+    }
+
+    @MainActor
+    private struct HostedFixture {
+        let store: RecorderMemoStore
+        let panel: NSPanel
+        let defaults: UserDefaults
+        let domain: String
+
+        func dispose() {
+            panel.contentViewController = nil
+            panel.close()
+            store.save()
+            defaults.removePersistentDomain(forName: domain)
+        }
+    }
+
+    private func makeFixture(_ text: String) -> Fixture {
+        _ = NSApplication.shared
+        let scroll = RecorderMemoTextView.MemoScrollView(frame: NSRect(x: 0, y: 0, width: 320, height: 180))
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true
+        scroll.scrollerStyle = .legacy
+        let storage = NSTextStorage(string: text)
+        let layout = NSLayoutManager()
+        let container = NSTextContainer(containerSize: NSSize(width: 292, height: CGFloat.greatestFiniteMagnitude))
+        storage.addLayoutManager(layout)
+        layout.addTextContainer(container)
+        let view = UndoTextView(frame: NSRect(x: 0, y: 0, width: 320, height: 180), textContainer: container)
+        view.isRichText = false
+        view.isEditable = true
+        view.isSelectable = true
+        view.allowsUndo = true
+        view.font = .systemFont(ofSize: 22)
+        view.textContainerInset = NSSize(width: 14, height: 14)
+        view.isVerticallyResizable = true
+        view.isHorizontallyResizable = false
+        view.autoresizingMask = [.width]
+        view.minSize = .zero
+        view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        container.widthTracksTextView = true
+        scroll.documentView = view
+        scroll.layoutSubtreeIfNeeded()
+        view.setFrameSize(NSSize(width: scroll.contentSize.width, height: 180))
+        layout.ensureLayout(for: container)
+        let height = max(layout.usedRect(for: container).maxY + view.textContainerInset.height * 2, scroll.contentSize.height)
+        view.setFrameSize(NSSize(width: scroll.contentSize.width, height: height))
+        let coordinator = RecorderMemoTextView.Coordinator(text: .constant(text),
+            selectedRange: .constant(NSRange(location: 0, length: 0)))
+        view.delegate = coordinator
+        scroll.onUserScroll = { [weak coordinator] in coordinator?.cancelScrollAnimation() }
+        return Fixture(view: view, scroll: scroll, layout: layout, container: container, coordinator: coordinator)
+    }
+
+    private func expectedTailScrollOrigin(_ range: NSRange, fixture: Fixture) -> CGFloat {
+        let tail = (fixture.view.string as NSString).rangeOfComposedCharacterSequence(at: NSMaxRange(range) - 1)
+        let glyph = fixture.layout.glyphRange(forCharacterRange: tail, actualCharacterRange: nil)
+        let line = fixture.layout.lineFragmentRect(forGlyphAt: glyph.location, effectiveRange: nil)
+        let viewport = fixture.scroll.contentView.bounds.height
+        return min(max(line.minY + fixture.view.textContainerInset.height - viewport / 3, 0),
+                   max(fixture.view.bounds.height - viewport, 0))
+    }
+
+    private struct Fixture {
+        let view: UndoTextView
+        let scroll: RecorderMemoTextView.MemoScrollView
+        let layout: NSLayoutManager
+        let container: NSTextContainer
+        let coordinator: RecorderMemoTextView.Coordinator
+    }
+
+    private final class UndoTextView: NSTextView {
+        let testUndoManager: UndoManager = {
+            let manager = UndoManager()
+            manager.groupsByEvent = false
+            return manager
+        }()
+        override var undoManager: UndoManager? { testUndoManager }
+    }
+}

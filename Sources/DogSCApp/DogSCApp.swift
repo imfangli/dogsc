@@ -235,6 +235,7 @@ enum WindowCoordinator {
 
     static func install(model: AppModel) {
         self.model = model
+        RecorderMemoController.shared.configure(model: model)
         recordingProjectEditor.onPresentationChange = { [weak model] in
             guard let model else { return }
             apply(phase: model.phase, model: model)
