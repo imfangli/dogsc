@@ -5,6 +5,9 @@ struct SubtitleAIConfigurationEditor: View {
     @State private var configuration = SubtitleAIConfiguration()
     @State private var errorMessage: String?
     @State private var saved = false
+    @State private var isTestingConnection = false
+    @State private var connectionSucceeded = false
+    @State private var connectionTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -24,6 +27,10 @@ struct SubtitleAIConfigurationEditor: View {
                 .font(.appUI(.caption)).foregroundStyle(EditorTheme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             if let errorMessage { Text(errorMessage).font(.appUI(.caption)).foregroundStyle(.red) }
+            if connectionSucceeded {
+                Label(appLocalized("连接成功，模型可用"), systemImage: "checkmark.circle.fill")
+                    .font(.appUI(.caption)).foregroundStyle(.green)
+            }
             HStack {
                 Button(appLocalized("保存配置")) {
                     do {
@@ -33,16 +40,61 @@ struct SubtitleAIConfigurationEditor: View {
                         onSaved()
                     } catch { errorMessage = appErrorDescription(error) }
                 }.buttonStyle(.editorPrimary)
+                    .disabled(isTestingConnection)
                     .accessibilityIdentifier("settings.subtitle-ai.save")
-                if saved { Text(appLocalized("已保存")).font(.appUI(.caption)).foregroundStyle(.secondary) }
+                Button(appLocalized(isTestingConnection ? "正在测试连接…" : "测试连接")) {
+                    testConnection()
+                }.buttonStyle(.editorQuiet)
+                    .disabled(isTestingConnection)
+                    .accessibilityIdentifier("settings.subtitle-ai.test")
+                if isTestingConnection {
+                    Button(appLocalized("取消")) { cancelConnectionTest() }
+                        .buttonStyle(.editorQuiet)
+                }
             }
+            if saved { Text(appLocalized("已保存")).font(.appUI(.caption)).foregroundStyle(.secondary) }
+            Text(appLocalized("测试只发送一条简短请求，不发送字幕或口播稿"))
+                .font(.appUI(.caption)).foregroundStyle(EditorTheme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .onAppear {
             do { configuration = try SubtitleAISettings.load() }
             catch { errorMessage = appErrorDescription(error) }
         }
-        .onChange(of: configuration) { _, _ in saved = false }
+        .onChange(of: configuration) { _, _ in
+            saved = false
+            connectionSucceeded = false
+            errorMessage = nil
+            cancelConnectionTest()
+        }
+        .onDisappear { cancelConnectionTest() }
         .accessibilityIdentifier("settings.subtitle-ai")
+    }
+
+    private func testConnection() {
+        guard !isTestingConnection else { return }
+        let candidate = configuration
+        isTestingConnection = true
+        connectionSucceeded = false
+        errorMessage = nil
+        connectionTask = Task { @MainActor in
+            do {
+                try await SubtitleAIClient().testConnection(configuration: candidate)
+                guard !Task.isCancelled, configuration == candidate else { return }
+                connectionSucceeded = true
+            } catch {
+                guard !Task.isCancelled, configuration == candidate else { return }
+                errorMessage = appErrorDescription(error)
+            }
+            isTestingConnection = false
+            connectionTask = nil
+        }
+    }
+
+    private func cancelConnectionTest() {
+        connectionTask?.cancel()
+        connectionTask = nil
+        isTestingConnection = false
     }
 
     private func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {

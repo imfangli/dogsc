@@ -9,6 +9,7 @@ final class EditorSubtitleController: ObservableObject {
     @Published private(set) var isBusy = false
     @Published private(set) var progress: Double = 0
     @Published private(set) var status = ""
+    @Published private(set) var startedAt: Date?
     @Published var errorMessage: String?
     @Published private(set) var needsModelDownload = false
     private var task: Task<Void, Never>?
@@ -25,6 +26,7 @@ final class EditorSubtitleController: ObservableObject {
         task = nil
         isBusy = false
         status = ""
+        startedAt = nil
         progress = 0
     }
 
@@ -153,6 +155,7 @@ final class EditorSubtitleController: ObservableObject {
         errorMessage = nil
         needsModelDownload = false
         isBusy = true
+        startedAt = Date()
         progress = 0
         self.status = status
         return operationID
@@ -160,7 +163,9 @@ final class EditorSubtitleController: ObservableObject {
 
     private func finish(_ token: UUID) {
         guard operationID == token else { return }
+        operationID = UUID()
         isBusy = false
+        startedAt = nil
         status = ""
         task = nil
     }

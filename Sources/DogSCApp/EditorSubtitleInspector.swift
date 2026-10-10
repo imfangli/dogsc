@@ -53,6 +53,13 @@ struct EditorSubtitleInspector: View {
                         Button(appLocalized("取消")) { controller.cancel() }.buttonStyle(.editorQuiet)
                     }
                     ProgressView(value: controller.progress, total: 1).tint(EditorTheme.selectionTint)
+                    if let startedAt = controller.startedAt, controller.status == "正在校对字幕" {
+                        TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                            Text(String(format: appLocalized("已用时 %d 秒"),
+                                max(0, Int(context.date.timeIntervalSince(startedAt)))))
+                                .font(.appUI(.caption)).foregroundStyle(EditorTheme.secondaryText)
+                        }
+                    }
                 }
                 .accessibilityIdentifier("editor.subtitles.progress")
             }
