@@ -67,6 +67,9 @@ extension SubtitleDocument {
         }
         var result: [ResolvedSubtitleCue] = []
         for cue in cues {
+            // Empty authored text suppresses the cue while retaining its word
+            // ownership. Editing the timeline must not restore the ASR text.
+            guard !SubtitleTextFormatter.format(cue.text).isEmpty else { continue }
             let ownedIDs = Set(cue.wordIDs)
             let original = cue.wordIDs.compactMap { wordLookup[$0] }
             let mappedWords: [MappedWord] = original.enumerated().compactMap { index, word in

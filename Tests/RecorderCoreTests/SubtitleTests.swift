@@ -75,6 +75,67 @@ final class SubtitleTests: XCTestCase {
         XCTAssertEqual(Set(cues.map(\.id)).count, 2)
     }
 
+    func testDeletedCueRemainsHiddenAfterTrim() throws {
+        var document = fixture()
+        let originalWords = document.words
+        let id = document.cues[0].id
+        try document.updateCueText(id: id, text: "")
+        let timeline = ProjectTimeline(sourceSequence: .edited([
+            RecordingSegment(sourceStart: 1, sourceDuration: 2),
+        ]))
+        let cues = try document.resolvedCues(timeline: timeline, sourceDuration: 3)
+        XCTAssertTrue(cues.isEmpty)
+        XCTAssertEqual(SubtitleSRTExporter.export(cues), "")
+        XCTAssertEqual(document.words, originalWords)
+        XCTAssertEqual(document.cues[0].wordIDs, originalWords.map(\.id))
+        XCTAssertTrue(document.cues[0].isManuallyEdited)
+        XCTAssertNoThrow(try document.validate())
+    }
+
+    func testDeletedCueRemainsHiddenAfterReorder() throws {
+        var document = fixture()
+        // A text edit that formats to empty has the same deletion semantics.
+        try document.updateCueText(id: document.cues[0].id, text: " \n。 ")
+        let timeline = ProjectTimeline(sourceSequence: .edited([
+            RecordingSegment(sourceStart: 2, sourceDuration: 1),
+            RecordingSegment(sourceStart: 0, sourceDuration: 2),
+        ]))
+        let cues = try document.resolvedCues(timeline: timeline, sourceDuration: 3)
+        XCTAssertTrue(cues.isEmpty)
+        XCTAssertEqual(SubtitleSRTExporter.export(cues), "")
+        XCTAssertEqual(document.cues[0].text, "")
+        XCTAssertTrue(document.cues[0].isManuallyEdited)
+    }
+
+    func testDeletedManuallyTimedCueRemainsHiddenAfterFurtherEdits() throws {
+        var document = fixture()
+        let originalWords = document.words
+        let id = document.cues[0].id
+        try document.updateCueTiming(id: id, outputTimeRange: .init(start: 0.2, end: 2.9),
+                                     timeline: ProjectTimeline(), sourceDuration: 3)
+        try document.updateCueText(id: id, text: "")
+        let timelines = [
+            ProjectTimeline(),
+            ProjectTimeline(sourceSequence: .edited([
+                RecordingSegment(sourceStart: 1, sourceDuration: 2),
+            ])),
+            ProjectTimeline(sourceSequence: .edited([
+                RecordingSegment(sourceStart: 2, sourceDuration: 1),
+                RecordingSegment(sourceStart: 0, sourceDuration: 2),
+            ])),
+        ]
+        for timeline in timelines {
+            let cues = try document.resolvedCues(timeline: timeline, sourceDuration: 3)
+            XCTAssertTrue(cues.isEmpty)
+            XCTAssertEqual(SubtitleSRTExporter.export(cues), "")
+        }
+        XCTAssertEqual(document.words, originalWords)
+        XCTAssertEqual(document.cues[0].wordIDs, originalWords.map(\.id))
+        XCTAssertEqual(document.cues[0].manualSourceRanges, [.init(start: 0.2, end: 2.9)])
+        XCTAssertTrue(document.cues[0].isManuallyEdited)
+        XCTAssertNoThrow(try document.validate())
+    }
+
     func testAICorrectionOnlyRegroupsStableUnits() throws {
         var document = fixture()
         let originalWords = document.words
