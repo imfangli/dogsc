@@ -53,7 +53,7 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
         Divider()
 
         Menu {
-            ForEach([1.0, 1.5, 2.0, 4.0, 8.0, 12.0, 20.0, 50.0, 100.0], id: \.self) { rate in
+            ForEach([1.0, 1.1, 1.5, 2.0, 4.0, 8.0, 12.0, 20.0, 50.0, 100.0], id: \.self) { rate in
                 Button {
                     setPrimarySegmentPlaybackRate(segment.id, rate: rate)
                 } label: {
