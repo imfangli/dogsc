@@ -362,6 +362,7 @@ final class RecorderMemoUITests: XCTestCase {
         fixture.store.isEditing = false
         shrink(fixture.panel, to: 420)
         await settleLayout(fixture.panel)
+        try await settleAnimatedMemoLayout(fixture.panel)
         let host = try XCTUnwrap(fixture.panel.contentViewController?.view)
         let scroll = try XCTUnwrap(findMemoScrollView(in: host))
         let view = try XCTUnwrap(scroll.documentView as? NSTextView)
@@ -378,7 +379,9 @@ final class RecorderMemoUITests: XCTestCase {
         let compactView = try XCTUnwrap(compactScroll.documentView as? NSTextView)
         XCTAssertTrue(compactView === view, "Changing chrome must retain the native text editor and its selection/undo state.")
         XCTAssertEqual(fixture.panel.frame, fullFrame, "Switching a sufficiently large window should preserve its frame.")
-        XCTAssertGreaterThan(compactScroll.contentView.bounds.height, fullViewportHeight + 120)
+        // The upstream glyph toolbar uses less chrome, while compact mode
+        // still releases the toolbar, speech controls and full-mode footer.
+        XCTAssertGreaterThan(compactScroll.contentView.bounds.height, fullViewportHeight + 100)
         XCTAssertFalse(fixture.store.isEditing)
         XCTAssertFalse(compactView.isEditable)
         XCTAssertEqual(compactView.selectedRange(), range)
@@ -394,12 +397,56 @@ final class RecorderMemoUITests: XCTestCase {
 
         fixture.store.setCompact(false)
         await settleLayout(fixture.panel)
+        try await settleAnimatedMemoLayout(fixture.panel)
         let restoredScroll = try XCTUnwrap(findMemoScrollView(in: host))
         XCTAssertTrue(restoredScroll.documentView === view)
         XCTAssertFalse(fixture.store.isEditing, "Leaving compact mode should keep reading mode.")
+        XCTAssertEqual(fixture.panel.frame, fullFrame, "Returning to full mode should restore the same window frame.")
         XCTAssertEqual(restoredScroll.contentView.bounds.height, fullViewportHeight, accuracy: 1)
         XCTAssertEqual(view.selectedRange(), range)
         XCTAssertEqual(view.string, source)
+        XCTAssertNotNil(view.layoutManager?.temporaryAttribute(.backgroundColor,
+            atCharacterIndex: range.location, effectiveRange: nil))
+    }
+
+    func testHostedMemoAppearanceAdaptsWhileCompactTextStaysWhiteAndKeepsReadingState() async throws {
+        let fixture = try makeHostedFixture()
+        defer { fixture.dispose() }
+        let source = "外观切换👩🏽‍💻时，原稿与跟读位置都应保留。"
+        fixture.store.text = source
+        fixture.store.isEditing = false
+        fixture.panel.appearance = NSAppearance(named: .aqua)
+        await settleLayout(fixture.panel)
+        let host = try XCTUnwrap(fixture.panel.contentViewController?.view)
+        let view = try XCTUnwrap(findMemoScrollView(in: host)?.documentView as? NSTextView)
+        let range = (source as NSString).range(of: "跟读位置")
+        view.setSelectedRange(range)
+        view.layoutManager?.addTemporaryAttribute(.backgroundColor, value: NSColor.systemGreen,
+            forCharacterRange: range)
+
+        let light = try resolvedTextColor(in: view)
+        XCTAssertLessThan(light.redComponent, 0.2)
+        fixture.panel.appearance = NSAppearance(named: .darkAqua)
+        await settleLayout(fixture.panel)
+        let dark = try resolvedTextColor(in: view)
+        XCTAssertGreaterThan(dark.redComponent, 0.9)
+
+        fixture.store.setCompact(true)
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            fixture.panel.appearance = NSAppearance(named: appearance)
+            await settleLayout(fixture.panel)
+            let color = try resolvedTextColor(in: view)
+            XCTAssertGreaterThanOrEqual(color.redComponent, 0.9)
+            XCTAssertGreaterThanOrEqual(color.greenComponent, 0.9)
+            XCTAssertGreaterThanOrEqual(color.blueComponent, 0.9)
+        }
+        fixture.store.setCompact(false)
+        fixture.panel.appearance = NSAppearance(named: .aqua)
+        await settleLayout(fixture.panel)
+        XCTAssertLessThan(try resolvedTextColor(in: view).redComponent, 0.2)
+        XCTAssertTrue(findMemoScrollView(in: host)?.documentView === view)
+        XCTAssertEqual(view.string, source)
+        XCTAssertEqual(view.selectedRange(), range)
         XCTAssertNotNil(view.layoutManager?.temporaryAttribute(.backgroundColor,
             atCharacterIndex: range.location, effectiveRange: nil))
     }
@@ -493,6 +540,14 @@ final class RecorderMemoUITests: XCTestCase {
         XCTAssertEqual(restoredFull.text, source)
     }
 
+    private func resolvedTextColor(in view: NSTextView) throws -> NSColor {
+        var color: NSColor?
+        view.effectiveAppearance.performAsCurrentDrawingAppearance {
+            color = view.textColor?.usingColorSpace(.deviceRGB)
+        }
+        return try XCTUnwrap(color)
+    }
+
     private func backgroundAlpha(in view: NSView) throws -> CGFloat {
         let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: bitmap)
@@ -548,6 +603,32 @@ final class RecorderMemoUITests: XCTestCase {
             try? await Task.sleep(for: .milliseconds(40))
         }
         panel.contentView?.layoutSubtreeIfNeeded()
+    }
+
+    private func settleAnimatedMemoLayout(_ panel: NSPanel) async throws {
+        let host = try XCTUnwrap(panel.contentViewController?.view)
+        let scroll = try XCTUnwrap(findMemoScrollView(in: host))
+        var previousFrame = panel.frame
+        var previousViewport = scroll.contentView.bounds
+        var stableSamples = 0
+        // Reading mode starts the upstream spring. Sampling after only the
+        // usual SwiftUI update turns can capture a viewport mid-animation.
+        // Require 200 ms of unchanged geometry, bounded at two seconds.
+        for _ in 0..<50 {
+            try await Task.sleep(for: .milliseconds(40))
+            host.layoutSubtreeIfNeeded()
+            let frame = panel.frame
+            let viewport = scroll.contentView.bounds
+            if frame == previousFrame && viewport == previousViewport {
+                stableSamples += 1
+                if stableSamples >= 5 { return }
+            } else {
+                stableSamples = 0
+            }
+            previousFrame = frame
+            previousViewport = viewport
+        }
+        XCTFail("The memo window and reading viewport should settle after the editing-mode animation.")
     }
 
     private func findMemoScrollView(in view: NSView) -> RecorderMemoTextView.MemoScrollView? {

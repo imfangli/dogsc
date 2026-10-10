@@ -30,7 +30,7 @@ struct RecorderMemoTextView: NSViewRepresentable {
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.borderType = .noBorder
-        let view = NSTextView(frame: .zero)
+        let view = MemoTextView(frame: .zero)
         view.drawsBackground = false
         view.isRichText = false
         view.allowsUndo = true
@@ -44,8 +44,9 @@ struct RecorderMemoTextView: NSViewRepresentable {
         view.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         view.minSize = .zero
         view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        view.textColor = NSColor(RecorderStyle.ink)
-        view.insertionPointColor = NSColor(RecorderStyle.ink)
+        view.isCompact = isCompact
+        view.textColor = isCompact ? .white : RecorderStyle.inkNSColor
+        view.insertionPointColor = view.textColor ?? RecorderStyle.inkNSColor
         view.focusRingType = .none
         view.setAccessibilityLabel(appLocalized("备忘录文稿"))
         view.string = text
@@ -62,7 +63,8 @@ struct RecorderMemoTextView: NSViewRepresentable {
         defer { context.coordinator.isApplyingViewUpdate = false }
         view.isEditable = isEditing
         view.isSelectable = true
-        let textColor = isCompact ? NSColor.white : NSColor(RecorderStyle.ink)
+        (view as? MemoTextView)?.isCompact = isCompact
+        let textColor = isCompact ? NSColor.white : RecorderStyle.inkNSColor
         if view.textColor != textColor { view.textColor = textColor }
         view.insertionPointColor = textColor
         (scroll as? MemoScrollView)?.usesTransparentScroller = isCompact
@@ -202,6 +204,26 @@ struct RecorderMemoTextView: NSViewRepresentable {
                   range.length > 0, range.length <= length - range.location else { return nil }
             // Never paint half an emoji, surrogate pair, or combining sequence.
             return string.rangeOfComposedCharacterSequences(for: range)
+        }
+    }
+
+    final class MemoTextView: NSTextView {
+        var isCompact = false {
+            didSet { if oldValue != isCompact { refreshTextColors() } }
+        }
+
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            // Refresh glyph attributes and caret without replacing the text,
+            // selection or IME marked range. Transparent prompts stay white.
+            refreshTextColors()
+        }
+
+        private func refreshTextColors() {
+            let color = isCompact ? NSColor.white : RecorderStyle.inkNSColor
+            textColor = color
+            insertionPointColor = color
+            needsDisplay = true
         }
     }
 
