@@ -44,7 +44,7 @@ extension EditorTimelineView {
 
     func seekTimeline(to time: TimeInterval) {
         let snapped = snappedTimelineTime(time)
-        playbackController.seek(to: snapped, pausing: true)
+        playbackController.seek(to: snapped, pausing: true, navigationOrigin: .timeline)
         scrollTimelineToEndpointIfNeeded(snapped)
     }
 

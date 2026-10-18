@@ -39,40 +39,41 @@ final class SubtitleTests: XCTestCase {
         XCTAssertEqual(try document.resolvedCues(timeline: timeline, sourceDuration: 3), cues)
     }
 
-    func testTrimDoesNotDisplayDeletedCorrectedWords() throws {
+    func testTrimKeepsCompleteCorrectedTextAndAdjustsTime() throws {
         let document = fixture()
         let timeline = ProjectTimeline(sourceSequence: .edited([
             RecordingSegment(sourceStart: 1, sourceDuration: 2),
         ]))
         let cues = try document.resolvedCues(timeline: timeline, sourceDuration: 3)
-        XCTAssertEqual(cues.map(\.text), ["第二第三"])
+        XCTAssertEqual(cues.map(\.text), ["校正后的完整句子"])
         XCTAssertEqual(cues[0].startTime, 0)
         XCTAssertEqual(cues[0].endTime, 1.8, accuracy: 0.000_001)
         XCTAssertTrue(cues[0].requiresReview)
     }
 
-    func testCutInsideTimedUnitOmitsItsUnrecoverableText() throws {
+    func testCutInsideTimedUnitPreservesCompleteCorrectedText() throws {
         let document = fixture()
         let timeline = ProjectTimeline(sourceSequence: .edited([
             RecordingSegment(sourceStart: 0.4, sourceDuration: 2.6),
         ]))
         let cues = try document.resolvedCues(timeline: timeline, sourceDuration: 3)
-        XCTAssertEqual(cues.map(\.text), ["第二第三"])
-        XCTAssertEqual(cues[0].startTime, 0.6, accuracy: 0.000_001)
+        XCTAssertEqual(cues.map(\.text), ["校正后的完整句子"])
+        XCTAssertEqual(cues[0].startTime, 0, accuracy: 0.000_001)
         XCTAssertTrue(cues[0].requiresReview)
     }
 
-    func testReorderSplitsCorrectedSentenceAndUsesSpokenOrder() throws {
+    func testReorderUsesLongestContinuousRunWithoutRepeatingText() throws {
         let document = fixture()
         let timeline = ProjectTimeline(sourceSequence: .edited([
             RecordingSegment(sourceStart: 2, sourceDuration: 1),
             RecordingSegment(sourceStart: 0, sourceDuration: 2),
         ]))
         let cues = try document.resolvedCues(timeline: timeline, sourceDuration: 3)
-        XCTAssertEqual(cues.map(\.text), ["第三", "第一第二"])
-        XCTAssertEqual(cues.map(\.startTime), [0, 1])
-        XCTAssertTrue(cues.allSatisfy(\.requiresReview))
-        XCTAssertEqual(Set(cues.map(\.id)).count, 2)
+        XCTAssertEqual(cues.map(\.text), ["校正后的完整句子"])
+        XCTAssertEqual(cues.map(\.startTime), [1])
+        XCTAssertEqual(cues[0].endTime, 2.8, accuracy: 0.000_001)
+        XCTAssertTrue(cues[0].wasRearranged)
+        XCTAssertTrue(cues[0].requiresReview)
     }
 
     func testDeletedCueRemainsHiddenAfterTrim() throws {
@@ -163,8 +164,9 @@ final class SubtitleTests: XCTestCase {
             RecordingSegment(sourceStart: Double($0), sourceDuration: 1)
         }))
         let cues = try document.resolvedCues(timeline: timeline, sourceDuration: 4)
-        XCTAssertEqual(cues.map(\.text), ["0", "2", "1", "3"])
-        XCTAssertEqual(cues.map(\.startTime), [0, 1, 2, 3])
+        XCTAssertEqual(cues.map(\.text), ["第一句", "第二句"])
+        XCTAssertEqual(cues.map(\.startTime), [0, 1])
+        XCTAssertTrue(cues.allSatisfy(\.wasRearranged))
         XCTAssertTrue(cues.allSatisfy(\.requiresReview))
     }
 
@@ -256,7 +258,7 @@ final class SubtitleTests: XCTestCase {
         XCTAssertEqual(restored[0].startTime, 1)
         let furtherTrim = ProjectTimeline(sourceSequence: .edited([RecordingSegment(sourceStart: 2, sourceDuration: 1)]))
         let recropped = try document.resolvedCues(timeline: furtherTrim, sourceDuration: 3)
-        XCTAssertEqual(recropped.map(\.text), ["第三"])
+        XCTAssertEqual(recropped.map(\.text), ["人工修正剩余字幕"])
         XCTAssertTrue(recropped[0].requiresReview)
     }
 
@@ -272,14 +274,18 @@ final class SubtitleTests: XCTestCase {
             RecordingSegment(sourceStart: 2, sourceDuration: 1),
             RecordingSegment(sourceStart: 0, sourceDuration: 1),
         ]))
-        XCTAssertTrue(try document.resolvedCues(timeline: reordered, sourceDuration: 4).isEmpty)
+        let rearranged = try document.resolvedCues(timeline: reordered, sourceDuration: 4)
+        XCTAssertEqual(rearranged.map(\.text), ["校正"])
+        XCTAssertTrue(rearranged[0].wasRearranged)
         let separated = ProjectTimeline(sourceSequence: .edited([
             RecordingSegment(sourceStart: 0, sourceDuration: 1),
             RecordingSegment(sourceStart: 3, sourceDuration: 1),
             RecordingSegment(sourceStart: 2, sourceDuration: 1),
         ]))
-        XCTAssertTrue(try document.resolvedCues(timeline: separated, sourceDuration: 4).isEmpty,
-                      "One word cannot stretch through inserted audio whose duration Apple never assigned it.")
+        let separatedRows = try document.resolvedCues(timeline: separated, sourceDuration: 4)
+        XCTAssertEqual(separatedRows.map(\.text), ["校正"])
+        XCTAssertEqual(separatedRows[0].duration, 0.1, accuracy: 0.000_001)
+        XCTAssertTrue(separatedRows[0].wasRearranged)
     }
 
     func testManualIntervalCannotSpanInterleavedForeignSpeech() throws {
@@ -298,8 +304,8 @@ final class SubtitleTests: XCTestCase {
             RecordingSegment(sourceStart: 1, sourceDuration: 1),
         ]))
         let cues = try document.resolvedCues(timeline: timeline, sourceDuration: 3)
-        XCTAssertEqual(cues.map(\.text), ["原句", "插入的其他句"])
-        XCTAssertEqual(cues[0].endTime, 0.8, accuracy: 0.000_001)
+        XCTAssertEqual(cues.map(\.text), ["人工修改的句子", "插入的其他句"])
+        XCTAssertEqual(cues[0].endTime, 1, accuracy: 0.000_001)
         XCTAssertTrue(cues[0].requiresReview)
         XCTAssertFalse(cues[1].requiresReview)
     }
@@ -320,8 +326,8 @@ final class SubtitleTests: XCTestCase {
             RecordingSegment(sourceStart: 1, sourceDuration: 1),
         ]))
         let cues = try document.resolvedCues(timeline: timeline, sourceDuration: 3)
-        XCTAssertEqual(cues.map(\.text), ["原句"])
-        XCTAssertEqual(cues[0].endTime, 0.8, accuracy: 0.000_001)
+        XCTAssertEqual(cues.map(\.text), ["人工修改的句子", "被截断的其他句"])
+        XCTAssertEqual(cues[0].endTime, 1, accuracy: 0.000_001)
         XCTAssertTrue(cues[0].requiresReview)
     }
 
@@ -347,24 +353,86 @@ final class SubtitleTests: XCTestCase {
         XCTAssertEqual(projected.last!.endTime, words.last!.sourceRanges[0].end, accuracy: 0.000_001)
     }
 
-    func testMaterializingReorderedFragmentsKeepsSelectedFragmentAndUniqueWordOwnership() throws {
+    func testEditingReorderedCuePreservesStableIdentityAndAllWordOwnership() throws {
         var document = fixture()
+        let authored = document.cues[0]
         let timeline = ProjectTimeline(sourceSequence: .edited([
             RecordingSegment(sourceStart: 2, sourceDuration: 1),
             RecordingSegment(sourceStart: 0, sourceDuration: 2),
         ]))
-        let rows = try document.resolvedCues(timeline: timeline, sourceDuration: 3)
-        let selected = try document.materializeResolvedCue(id: rows[1].id, timeline: timeline, sourceDuration: 3)
-        try document.updateCueText(id: selected, text: "改过的第二段")
-        XCTAssertEqual(document.cues.count, 2)
-        XCTAssertEqual(Set(document.cues.flatMap(\.wordIDs)).count, 3)
-        XCTAssertEqual(document.cues.flatMap(\.wordIDs).count, 3)
-        XCTAssertTrue(document.cues.allSatisfy(\.isManuallyEdited))
+        let row = try XCTUnwrap(document.resolvedCues(timeline: timeline, sourceDuration: 3).first)
+        let id = try document.materializeResolvedCue(id: row.id, timeline: timeline, sourceDuration: 3)
+        XCTAssertEqual(id, authored.id)
+        XCTAssertEqual(document.cues.count, 1)
+        XCTAssertEqual(document.cues[0].text, authored.text)
+        XCTAssertEqual(document.cues[0].wordIDs, authored.wordIDs)
+        try document.updateCueText(id: id, text: "人工校对全文")
         let projected = try document.resolvedCues(timeline: timeline, sourceDuration: 3)
-        XCTAssertEqual(projected.map(\.text), ["第三", "改过的第二段"])
-        XCTAssertEqual(projected[1].cueID, selected)
-        XCTAssertTrue(projected.allSatisfy { !$0.requiresReview })
+        XCTAssertEqual(projected.map(\.text), ["人工校对全文"])
+        XCTAssertEqual(projected[0].startTime, 1)
+        XCTAssertFalse(projected[0].requiresReview)
         XCTAssertNoThrow(try document.validate())
+    }
+
+    func testEntirelyRemovedCueRemainsUnassignedAndCanBePlacedInFreeGap() throws {
+        var document = fixture()
+        let original = document
+        let timeline = ProjectTimeline(sourceSequence: .edited([
+            RecordingSegment(sourceStart: 3, sourceDuration: 2),
+        ]))
+        XCTAssertTrue(try document.resolvedCues(timeline: timeline, sourceDuration: 5).isEmpty)
+        XCTAssertEqual(try document.unassignedCues(timeline: timeline, sourceDuration: 5), original.cues)
+        XCTAssertEqual(document, original, "Projection never mutates or deletes the authored document.")
+        try document.placeCue(id: document.cues[0].id, atOutputTime: 1.5, timeline: timeline, sourceDuration: 5)
+        let placed = try XCTUnwrap(document.resolvedCues(timeline: timeline, sourceDuration: 5).first)
+        XCTAssertEqual(placed.text, original.cues[0].text)
+        XCTAssertEqual(placed.startTime, 1.5)
+        XCTAssertEqual(placed.endTime, 2, "Suggested duration is clipped to the output end.")
+        XCTAssertEqual(document.words, original.words)
+        XCTAssertEqual(document.cues[0].wordIDs, original.cues[0].wordIDs)
+        XCTAssertTrue(try document.unassignedCues(timeline: timeline, sourceDuration: 5).isEmpty)
+        XCTAssertNoThrow(try document.validate())
+    }
+
+    func testPlacementNeverOverwritesOtherSubtitlesAndStopsAtNextCue() throws {
+        var document = fixture()
+        let other = SubtitleCue(wordIDs: [], text: "相邻字幕", manualSourceRanges: [.init(start: 4, end: 4.8)], isManuallyEdited: true)
+        document.cues.append(other)
+        let timeline = ProjectTimeline(sourceSequence: .edited([RecordingSegment(sourceStart: 3, sourceDuration: 2)]))
+        let unchanged = document
+        XCTAssertThrowsError(try document.placeCue(id: document.cues[0].id, atOutputTime: 1.2,
+            timeline: timeline, sourceDuration: 5)) { error in
+            XCTAssertEqual(error as? SubtitleEditingError, .overlappingTiming)
+        }
+        XCTAssertEqual(document, unchanged)
+        try document.placeCue(id: document.cues[0].id, atOutputTime: 0.2, timeline: timeline, sourceDuration: 5)
+        let rows = try document.resolvedCues(timeline: timeline, sourceDuration: 5)
+        XCTAssertEqual(rows[0].startTime, 0.2, accuracy: 0.000_001)
+        XCTAssertEqual(rows[0].endTime, 1)
+        XCTAssertEqual(document.cues[1], other)
+    }
+
+    func testVeryShortRemainingRangeKeepsTextAndWarnsWithoutExtending() throws {
+        let document = fixture()
+        let timeline = ProjectTimeline(sourceSequence: .edited([RecordingSegment(sourceStart: 1.2, sourceDuration: 0.2)]))
+        let row = try XCTUnwrap(document.resolvedCues(timeline: timeline, sourceDuration: 3).first)
+        XCTAssertEqual(row.text, document.cues[0].text)
+        XCTAssertEqual(row.duration, 0.2, accuracy: 0.000_001)
+        XCTAssertTrue(row.isTooShort)
+        XCTAssertFalse(row.wasRearranged)
+    }
+
+    func testOrdinarySplitAndSourceRestorationKeepStableCueTextAndIdentity() throws {
+        let document = fixture()
+        let original = try document.resolvedCues(timeline: ProjectTimeline(), sourceDuration: 3)
+        let split = ProjectTimeline(sourceSequence: .edited([
+            RecordingSegment(sourceStart: 0, sourceDuration: 0.4),
+            RecordingSegment(sourceStart: 0.4, sourceDuration: 2.6),
+        ]))
+        XCTAssertEqual(try document.resolvedCues(timeline: split, sourceDuration: 3), original)
+        let removed = ProjectTimeline(sourceSequence: .edited([RecordingSegment(sourceStart: 3, sourceDuration: 1)]))
+        XCTAssertEqual(try document.unassignedCues(timeline: removed, sourceDuration: 4), document.cues)
+        XCTAssertEqual(try document.resolvedCues(timeline: ProjectTimeline(), sourceDuration: 3), original)
     }
 
     func testManualFreeSplitDoesNotInventRecognizedUnitTimes() throws {
@@ -437,7 +505,7 @@ final class SubtitleTests: XCTestCase {
             RecordingSegment(sourceStart: 1, sourceDuration: 2, playbackRate: 2),
         ]))
         let cues = try document.resolvedCues(timeline: timeline, sourceDuration: 3)
-        XCTAssertEqual(SubtitleSRTExporter.export(cues), "1\n00:00:00,000 --> 00:00:00,900\n第二第三\n")
+        XCTAssertEqual(SubtitleSRTExporter.export(cues), "1\n00:00:00,000 --> 00:00:00,900\n校正后的完整句子\n")
         let tiny = ResolvedSubtitleCue(id: "tiny", cueID: UUID(), text: "短。", startTime: 3_661.2345, endTime: 3_661.2346)
         XCTAssertEqual(SubtitleSRTExporter.export([tiny]), "1\n01:01:01,235 --> 01:01:01,236\n短\n")
     }

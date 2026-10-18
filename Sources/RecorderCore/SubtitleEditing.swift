@@ -39,48 +39,44 @@ extension SubtitleEditingError: LocalizedError {
 }
 
 extension SubtitleDocument {
-    /// Converts every visible fragment of one cropped/rearranged cue into an
-    /// explicit human-editable cue. Removed units are retained as protected ID
-    /// ownership on the first fragment; they never contribute display timing.
-    /// Returning the selected fragment's authored ID lets UI keep its selection.
+    /// Acknowledges a projected interval without replacing authored text,
+    /// creating fragment IDs, or losing the original unit ownership.
     @discardableResult
     public mutating func materializeResolvedCue(
         id: String, timeline: ProjectTimeline, sourceDuration: TimeInterval
     ) throws -> UUID {
         let projected = try resolvedCues(timeline: timeline, sourceDuration: sourceDuration)
         guard let selected = projected.first(where: { $0.id == id }),
-              let authoredIndex = cues.firstIndex(where: { $0.id == selected.cueID }) else {
+              let index = cues.firstIndex(where: { $0.id == selected.cueID }) else {
             throw SubtitleEditingError.cueNotFound
         }
-        let fragments = projected.filter { $0.cueID == selected.cueID }
-        guard fragments.count > 1 || selected.requiresReview else { return selected.cueID }
-        let authored = cues[authoredIndex]
-        let anchors = try fragments.map {
-            try Self.sourceRanges(for: .init(start: $0.startTime, end: $0.endTime),
-                                  timeline: timeline, sourceDuration: sourceDuration)
+        if selected.requiresReview {
+            cues[index].manualSourceRanges = try Self.sourceRanges(
+                for: .init(start: selected.startTime, end: selected.endTime),
+                timeline: timeline, sourceDuration: sourceDuration)
+            cues[index].isManuallyEdited = true
         }
-        let lookup = Dictionary(words.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        var ownership = Array(repeating: [UUID](), count: fragments.count)
-        for wordID in authored.wordIDs {
-            guard let word = lookup[wordID] else { continue }
-            let overlap = anchors.map { ranges in
-                word.sourceRanges.reduce(0.0) { total, wordRange in
-                    total + ranges.reduce(0.0) { sum, range in
-                        sum + max(0, min(wordRange.end, range.end) - max(wordRange.start, range.start))
-                    }
-                }
-            }
-            let owner = overlap.enumerated().max { $0.element < $1.element }
-            ownership[(owner?.element ?? 0) > 0.000_01 ? owner!.offset : 0].append(wordID)
+        return selected.cueID
+    }
+
+    /// Restores an unassigned cue into a free output gap. Its original words
+    /// and authored text remain intact; only the human timing override changes.
+    public mutating func placeCue(
+        id: UUID, atOutputTime start: TimeInterval,
+        timeline: ProjectTimeline, sourceDuration: TimeInterval
+    ) throws {
+        guard let cue = cues.first(where: { $0.id == id }),
+              !SubtitleTextFormatter.format(cue.text).isEmpty else { throw SubtitleEditingError.cueNotFound }
+        let map = try TimelineMap(sourceSequence: timeline.sourceSequence, fullSourceDuration: sourceDuration)
+        guard start.isFinite, start >= 0, start < map.outputDuration else { throw SubtitleEditingError.invalidTimeRange }
+        let others = try resolvedCues(timeline: timeline, sourceDuration: sourceDuration).filter { $0.cueID != id }
+        guard !others.contains(where: { start >= $0.startTime && start < $0.endTime }) else {
+            throw SubtitleEditingError.overlappingTiming
         }
-        let replacements = fragments.enumerated().map { index, fragment in
-            SubtitleCue(id: index == 0 ? authored.id : UUID(), wordIDs: ownership[index],
-                        text: fragment.text, manualSourceRanges: anchors[index], isManuallyEdited: true)
-        }
-        let selectedIndex = fragments.firstIndex(where: { $0.id == id })!
-        let selectionID = replacements[selectedIndex].id
-        cues.replaceSubrange(authoredIndex...authoredIndex, with: replacements)
-        return selectionID
+        let nextStart = others.filter { $0.startTime > start }.map(\.startTime).min() ?? map.outputDuration
+        let end = min(start + cue.suggestedDuration, nextStart, map.outputDuration)
+        try updateCueTiming(id: id, outputTimeRange: .init(start: start, end: end),
+                            timeline: timeline, sourceDuration: sourceDuration)
     }
 
     /// Validates exact ordered coverage for the whole document, or an explicit

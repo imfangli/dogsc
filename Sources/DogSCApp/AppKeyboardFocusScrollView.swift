@@ -1,5 +1,34 @@
 import AppKit
+import Combine
 import SwiftUI
+
+struct AppScrollRevealRequest: Equatable {
+    let id: UUID
+    var revision = UUID()
+}
+
+struct AppScrollRevealPreferenceKey: PreferenceKey {
+    static var defaultValue: AppScrollRevealRequest? { nil }
+    static func reduce(value: inout AppScrollRevealRequest?, nextValue: () -> AppScrollRevealRequest?) {
+        if let next = nextValue() { value = next }
+    }
+}
+
+@MainActor
+final class AppScrollActivity: ObservableObject {
+    let userInteractions = PassthroughSubject<Void, Never>()
+}
+
+private struct AppScrollActivityKey: EnvironmentKey {
+    static var defaultValue: AppScrollActivity? { nil }
+}
+
+extension EnvironmentValues {
+    var appScrollActivity: AppScrollActivity? {
+        get { self[AppScrollActivityKey.self] }
+        set { self[AppScrollActivityKey.self] = newValue }
+    }
+}
 
 /// Kept by the owner of a set of tasks. Native scrolling updates this memory
 /// without invalidating the SwiftUI inspector on every wheel event.
@@ -26,6 +55,7 @@ struct AppKeyboardFocusScrollView<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let content: Content
     private let savedPosition: AppScrollPosition?
+    @StateObject private var scrollActivity = AppScrollActivity()
 
     init(
         savedPosition: AppScrollPosition? = nil,
@@ -40,12 +70,26 @@ struct AppKeyboardFocusScrollView<Content: View>: View {
             ScrollView {
                 content.focusSection()
                     .background {
-                        if let savedPosition {
-                            AppScrollPositionBridge(position: savedPosition)
+                        AppScrollPositionBridge(position: savedPosition) {
+                            scrollActivity.userInteractions.send()
                         }
                     }
             }
+                .environment(\.appScrollActivity, scrollActivity)
                 .environment(\.appKeyboardFocusScrollEnabled, true)
+                .overlayPreferenceValue(AppScrollRevealPreferenceKey.self) { request in
+                    Color.clear
+                        .task(id: request) {
+                            guard let request else { return }
+                            await Task.yield()
+                            guard !Task.isCancelled else { return }
+                            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
+                                proxy.scrollTo(request.id, anchor: .center)
+                            }
+                        }
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
                 .overlayPreferenceValue(AppKeyboardFocusScrollTargetKey.self) { target in
                     GeometryReader { viewport in
                         let request = AppKeyboardFocusScrollRequest(
@@ -83,16 +127,17 @@ private struct AppKeyboardFocusScrollRequest: Equatable {
 /// macOS 14's ID-based scroll API cannot restore an arbitrary position between
 /// controls. This passive view observes only its enclosing native scroll view.
 private struct AppScrollPositionBridge: NSViewRepresentable {
-    let position: AppScrollPosition
+    let position: AppScrollPosition?
+    var onUserScroll: () -> Void
 
     func makeNSView(context: Context) -> ObserverView {
         let view = ObserverView(frame: .zero)
-        view.configure(position: position)
+        view.configure(position: position, onUserScroll: onUserScroll)
         return view
     }
 
     func updateNSView(_ nsView: ObserverView, context: Context) {
-        nsView.configure(position: position)
+        nsView.configure(position: position, onUserScroll: onUserScroll)
     }
 
     static func dismantleNSView(_ nsView: ObserverView, coordinator: ()) {
@@ -101,6 +146,7 @@ private struct AppScrollPositionBridge: NSViewRepresentable {
 
     final class ObserverView: NSView {
         private var position: AppScrollPosition?
+        private var onUserScroll: (() -> Void)?
         private weak var scrollView: NSScrollView?
         private var needsRestore = true
         private var restoreIsScheduled = false
@@ -117,11 +163,12 @@ private struct AppScrollPositionBridge: NSViewRepresentable {
             connect()
         }
 
-        func configure(position: AppScrollPosition) {
+        func configure(position: AppScrollPosition?, onUserScroll: @escaping () -> Void) {
+            self.onUserScroll = onUserScroll
             if self.position !== position {
                 disconnect()
                 self.position = position
-                needsRestore = true
+                needsRestore = position != nil
             }
             connect()
         }
@@ -131,7 +178,10 @@ private struct AppScrollPositionBridge: NSViewRepresentable {
             if scrollView !== resolved {
                 disconnect()
                 scrollView = resolved
-                needsRestore = true
+                needsRestore = position != nil
+                for name in [NSScrollView.willStartLiveScrollNotification, NSScrollView.didLiveScrollNotification] {
+                    NotificationCenter.default.addObserver(self, selector: #selector(userDidScroll), name: name, object: resolved)
+                }
                 let clipView = resolved.contentView
                 clipView.postsBoundsChangedNotifications = true
                 NotificationCenter.default.addObserver(
@@ -154,6 +204,8 @@ private struct AppScrollPositionBridge: NSViewRepresentable {
             NotificationCenter.default.removeObserver(self)
             scrollView = nil
         }
+
+        @objc private func userDidScroll(_ notification: Notification) { onUserScroll?() }
 
         @objc private func boundsChanged(_ notification: Notification) {
             rememberPosition()

@@ -338,11 +338,13 @@ struct TimelineScrollViewBridge: NSViewRepresentable {
         weak var playbackController: EditorPlaybackController?
         var resolutionIsScheduled = false
         private var previousIsPlaying: Bool?
+        private var previousNavigationRevision: UInt64?
 
         func configure(playbackController: EditorPlaybackController) {
             guard self.playbackController !== playbackController else { return }
             self.playbackController?.removeNativeTimelineObserver(self)
             previousIsPlaying = nil
+            previousNavigationRevision = nil
             self.playbackController = playbackController
             playbackController.addNativeTimelineObserver(self)
         }
@@ -356,16 +358,19 @@ struct TimelineScrollViewBridge: NSViewRepresentable {
             playbackController = nil
             resolvedScrollView = nil
             previousIsPlaying = nil
+            previousNavigationRevision = nil
         }
 
         func editorPlaybackTimelineDidUpdate(
             _ snapshot: EditorPlaybackTimelineSnapshot
         ) {
             let previous = previousIsPlaying
+            let navigated = previousNavigationRevision.map { $0 != snapshot.navigationRevision } ?? false
+            previousNavigationRevision = snapshot.navigationRevision
             previousIsPlaying = snapshot.isPlaying
-            // Initial attachment and ordinary clock ticks never move the
-            // viewport. Only a real play/pause transition may reveal it.
-            guard let previous, previous != snapshot.isPlaying,
+            // Explicit paused seeks (including subtitle clicks) also reveal
+            // the playhead. Ordinary clock ticks leave the viewport in place.
+            guard let previous, previous != snapshot.isPlaying || navigated,
                   snapshot.allowsViewportReveal,
                   let playbackController else { return }
             // Pause publishes its state before the final sampled time. Wait
@@ -1034,7 +1039,7 @@ struct EditorTimelineView: View {
             currentTime: playbackTime,
             outputDuration: timelineDuration
         ) else { return }
-        playbackController.seek(to: revealTime, pausing: true)
+        playbackController.seek(to: revealTime, pausing: true, navigationOrigin: .timeline)
     }
 
     var showsScreenMotionTimeline: Bool {

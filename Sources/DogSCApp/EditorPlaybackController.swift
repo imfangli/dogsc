@@ -255,13 +255,27 @@ final class EditorPlaybackController: ObservableObject {
     }
 
     private var allowsTimelineViewportReveal = true
+    private var navigationRevision: UInt64 = 0
+    private var navigationOrigin: EditorPlaybackNavigationOrigin?
+
+    /// Explicit transport intent is distinct from display-link ticks and hover
+    /// previews, so subtitle drafts are never committed by ordinary playback.
+    func updateNavigationTime(_ time: TimeInterval, origin: EditorPlaybackNavigationOrigin?) {
+        if let origin {
+            navigationRevision &+= 1
+            navigationOrigin = origin
+        }
+        latestOutputTime = time
+        if origin != nil { notifyNativeTimelineObservers() }
+    }
 
     private var nativeTimelineSnapshot: EditorPlaybackTimelineSnapshot {
         EditorPlaybackTimelineSnapshot(
             outputTime: latestOutputTime,
             duration: duration,
             isPlaying: isPlaying,
-            allowsViewportReveal: allowsTimelineViewportReveal
+            allowsViewportReveal: allowsTimelineViewportReveal,
+            navigationRevision: navigationRevision, navigationOrigin: navigationOrigin
         )
     }
 
@@ -925,10 +939,11 @@ final class EditorPlaybackController: ObservableObject {
         to requestedTime: TimeInterval,
         pausing: Bool = true,
         resumeAfterCompletion: Bool = false,
-        loadsPausedFrame: Bool = true
+        loadsPausedFrame: Bool = true,
+        navigationOrigin: EditorPlaybackNavigationOrigin? = nil
     ) {
         guard let primaryPlayer else {
-            latestOutputTime = requestedTime
+            updateNavigationTime(requestedTime, origin: navigationOrigin)
             return
         }
         // 显式 seek（键盘步进、点击标尺等）接管传输层，悬浮预览立即让位。
@@ -951,7 +966,7 @@ final class EditorPlaybackController: ObservableObject {
         cancelPausedFrameDecode()
         // 保留上一张暂停帧继续显示：异步精确 seek + 新帧解码完成前不黑屏，
         // 快速拖动播放头时旧帧短暂停留远比全程黑帧好。
-        latestOutputTime = target
+        updateNavigationTime(target, origin: navigationOrigin)
         resetPlaybackAnchor(to: target)
         advanceDiscontinuity()
         Task { [weak self] in

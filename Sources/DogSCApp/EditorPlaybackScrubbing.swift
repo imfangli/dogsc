@@ -38,7 +38,7 @@ extension EditorPlaybackController {
         )
         // The pointer clock never waits for decoding. A completed seek only
         // publishes a preview frame; it must never pull this clock backwards.
-        latestOutputTime = target
+        updateNavigationTime(target, origin: .timeline)
         resetPlaybackAnchor(to: target)
         scrubSeekCoalescer.update(target)
         scheduleScrubSeekIfNeeded()

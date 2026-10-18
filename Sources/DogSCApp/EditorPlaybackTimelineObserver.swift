@@ -1,11 +1,15 @@
 import Foundation
 import QuartzCore
 
+enum EditorPlaybackNavigationOrigin: Equatable { case timeline, subtitle }
+
 struct EditorPlaybackTimelineSnapshot: Equatable {
     let outputTime: TimeInterval
     let duration: TimeInterval
     let isPlaying: Bool
     var allowsViewportReveal = true
+    var navigationRevision: UInt64 = 0
+    var navigationOrigin: EditorPlaybackNavigationOrigin?
 }
 
 @MainActor

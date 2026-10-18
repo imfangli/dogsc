@@ -838,7 +838,7 @@ struct EditorView: View {
     private func stepTransport(byFrames frames: Int) {
         let duration = max(mediaSession.outputDuration, 0)
         let target = min(max(playbackController.outputTime + Double(frames) * transportFrameDuration, 0), duration)
-        playbackController.seek(to: target, pausing: true)
+        playbackController.seek(to: target, pausing: true, navigationOrigin: .timeline)
     }
 
     private var transportControls: some View {

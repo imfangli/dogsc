@@ -65,6 +65,8 @@ struct EditorInspectorView: View {
     @State private var scrollPositions = AppScrollPositionMemory<EditorInspectorScrollContext>()
     @StateObject private var systemWallpaperCatalog = SystemWallpaperCatalog()
     @StateObject private var subtitleController = EditorSubtitleController()
+    @StateObject private var subtitleNavigation = EditorSubtitleNavigation()
+    @StateObject private var subtitleEditing = EditorSubtitleEditingSession()
     /// Set only while a frame sub-page change is being presented.
     @State private var frameTabDrift: CGFloat?
     @State private var settledPageKey = ""
@@ -293,6 +295,26 @@ struct EditorInspectorView: View {
                     .padding(.top, 4)
                     .padding(.bottom, usesCompactBackgroundLayout ? 10 : 16)
             }
+            if selectedInspector == .subtitles, !isCropping,
+               !subtitleNavigation.isFollowing || subtitleNavigation.unassignedCount > 0 {
+                HStack(spacing: 8) {
+                    if subtitleNavigation.unassignedCount > 0 {
+                        Button(String(format: appLocalized("未分配 %d"), subtitleNavigation.unassignedCount)) {
+                            subtitleNavigation.unassignedRequests.send()
+                        }.buttonStyle(.editorQuiet)
+                    } else {
+                        Text(appLocalized("已暂停跟随")).font(.appUI(.caption))
+                            .foregroundStyle(EditorTheme.secondaryText)
+                    }
+                    Spacer(minLength: 0)
+                    if !subtitleNavigation.isFollowing {
+                        Button(appLocalized("跟随播放")) { subtitleNavigation.resumeRequests.send() }
+                            .buttonStyle(.editorQuiet)
+                            .accessibilityIdentifier("editor.subtitles.follow")
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 10)
+            }
         }
         .frame(width: contentWidth)
         // The floating island beneath owns the lit material; an opaque fill
@@ -380,6 +402,7 @@ struct EditorInspectorView: View {
 
     private var inspectorScrollContext: EditorInspectorScrollContext {
         if isCropping { return .crop }
+        if selectedInspector == .subtitles { return .tab(.subtitles) }
         if primarySelectionKeepsInspectorTask {
             return .tab(selectedInspector)
         }
@@ -424,7 +447,9 @@ struct EditorInspectorView: View {
                 editorStore: editorStore,
                 mediaSession: mediaSession,
                 playbackController: playbackController,
-                controller: subtitleController
+                controller: subtitleController,
+                navigation: subtitleNavigation,
+                editing: subtitleEditing
             )
         } else if case .mosaic = editorStore.selection {
             overlayInspector

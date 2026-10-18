@@ -2064,3 +2064,22 @@
 "编辑中" = "Editing";
 "项目已自动保存" = "Project Saved";
 "正在编辑项目" = "Editing Project";
+
+/* Inline subtitle editing and timeline following. */
+"声音来源或剪辑已改变，请检查字幕时间；重新生成会替换现有字幕" = "The audio source or edit changed. Check subtitle timing; regeneration replaces existing subtitles.";
+"这条字幕已在其他操作中改变，草稿已保留。请取消本轮修改后重新编辑。" = "This subtitle changed in another operation. Your draft is preserved. Cancel this edit and try again.";
+"时间线已改变，草稿已保留。请取消本轮时间修改后重新编辑。" = "The timeline changed. Your draft is preserved. Cancel the timing edit and try again.";
+"失焦自动保存 · Esc 取消" = "Autosave on blur · Esc to cancel";
+"未分配字幕 · %d" = "Unassigned Subtitles · %d";
+"这些字幕的对应片段已被剪掉。文字仍保留，暂不显示或导出。" = "The corresponding clips were removed. Text is preserved but hidden from preview and export.";
+"未分配" = "Unassigned";
+"当前字幕" = "Current Subtitle";
+"时间过短，需调整" = "Too short to read; adjust timing";
+"重排后需复核" = "Reordered; review timing";
+"剪辑后文字已保留，可检查显示时间" = "Text preserved after trim; check timing";
+"放到播放头" = "Place at Playhead";
+"放置字幕" = "Place Subtitle";
+"未分配 %d" = "Unassigned: %d";
+"已暂停跟随" = "Following paused";
+"跟随播放" = "Follow Playback";
+"播放头位置已有字幕，请选择空白位置" = "A subtitle already occupies the playhead. Choose an empty position.";

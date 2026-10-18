@@ -63,7 +63,7 @@ extension EditorInspectorView {
                 }
                 HStack(spacing: 8) {
                     Button("定位到此段") {
-                        playbackController.seek(to: context.segment.outputStart)
+                        playbackController.seek(to: context.segment.outputStart, navigationOrigin: .timeline)
                     }
                     .buttonStyle(.editorQuiet)
                     if !inherits {

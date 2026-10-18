@@ -46,6 +46,10 @@ public struct SubtitleCue: Codable, Equatable, Identifiable, Sendable {
     public var manualSourceRanges: [SubtitleTimeRange]?
     public var isManuallyEdited: Bool
 
+    public var suggestedDuration: TimeInterval {
+        min(max(Double(SubtitleTextFormatter.format(text).filter { !$0.isWhitespace }.count) / 7, 1), 8)
+    }
+
     public init(
         id: UUID = UUID(), wordIDs: [UUID], text: String,
         manualSourceRanges: [SubtitleTimeRange]? = nil, isManuallyEdited: Bool = false
@@ -130,8 +134,8 @@ public struct SubtitleDocument: Codable, Equatable, Sendable {
     }
 }
 
-/// A projected display interval. One authored cue can become several pieces
-/// after a rearrangement. The fragment identity is deterministic across frames.
+/// One projected display interval per authored cue, with a stable identity.
+/// Rearranged cues choose their longest continuous surviving interval.
 public struct ResolvedSubtitleCue: Equatable, Identifiable, Sendable {
     public var id: String
     public var cueID: UUID
@@ -139,10 +143,11 @@ public struct ResolvedSubtitleCue: Equatable, Identifiable, Sendable {
     public var startTime: TimeInterval
     public var endTime: TimeInterval
     public var requiresReview: Bool
+    public var wasRearranged: Bool
 
     public init(
         id: String, cueID: UUID, text: String, startTime: TimeInterval,
-        endTime: TimeInterval, requiresReview: Bool = false
+        endTime: TimeInterval, requiresReview: Bool = false, wasRearranged: Bool = false
     ) {
         self.id = id
         self.cueID = cueID
@@ -150,7 +155,11 @@ public struct ResolvedSubtitleCue: Equatable, Identifiable, Sendable {
         self.startTime = startTime
         self.endTime = endTime
         self.requiresReview = requiresReview
+        self.wasRearranged = wasRearranged
     }
 
     public var duration: TimeInterval { endTime - startTime }
+    public var isTooShort: Bool {
+        duration < max(0.6, Double(text.filter { !$0.isWhitespace }.count) / 12)
+    }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import RecorderCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -8,26 +9,38 @@ struct EditorSubtitleInspector: View {
     @ObservedObject var mediaSession: EditorMediaSession
     @ObservedObject var playbackController: EditorPlaybackController
     @ObservedObject var controller: EditorSubtitleController
+    @ObservedObject var navigation: EditorSubtitleNavigation
+    @ObservedObject var editing: EditorSubtitleEditingSession
+    @Environment(\.appScrollActivity) private var scrollActivity
     @State private var showsAISettings = false
     @State private var scriptDraft = ""
     @State private var themeDraft = ""
-    @State private var selectedID: UUID?
-    @State private var selectedFragmentID: String?
     @State private var resolvedRows: [ResolvedSubtitleCue] = []
-    @State private var textDraft = ""
-    @State private var startDraft = ""
-    @State private var endDraft = ""
     @State private var splitBoundary: Double?
     @State private var firstSplitText = ""
     @State private var secondSplitText = ""
     @State private var styleInteractionID: UUID?
     @FocusState private var referenceFocus: ReferenceField?
     private enum ReferenceField { case script, theme }
+    @FocusState private var subtitleFocus: SubtitleField?
+    private enum SubtitleField: Hashable { case text, start, end }
+    @State private var operationError: String?
+    private var selectedID: UUID? { editing.draft?.cueID }
+    private var textDraft: String { editing.draft?.text ?? "" }
+    private var unassigned: [SubtitleCue] {
+        guard sourceDuration > 0 else { return [] }
+        let assigned = Set(resolvedRows.map(\.cueID))
+        return document.cues.filter { !assigned.contains($0.id) && !SubtitleTextFormatter.format($0.text).isEmpty }
+    }
+    private func draftBinding(_ keyPath: WritableKeyPath<EditorSubtitleDraft, String>) -> Binding<String> {
+        Binding(get: { editing.draft?[keyPath: keyPath] ?? "" },
+                set: { editing.draft?[keyPath: keyPath] = $0 })
+    }
 
     private var document: SubtitleDocument { editorStore.previewProject.subtitles }
     private var sourceDuration: Double { mediaSession.mediaPlan?.timelineMap.fullSourceDuration ?? 0 }
     private var resolved: [ResolvedSubtitleCue] { resolvedRows }
-    private var selectedRow: ResolvedSubtitleCue? { resolved.first { $0.id == selectedFragmentID } }
+    private var selectedRow: ResolvedSubtitleCue? { resolved.first { $0.cueID == selectedID } }
     private var selectedCue: SubtitleCue? { document.cues.first { $0.id == selectedID } }
     private var canGenerate: Bool {
         guard #available(macOS 26, *), case .ready = mediaSession.state else { return false }
@@ -69,20 +82,59 @@ struct EditorSubtitleInspector: View {
                     .accessibilityIdentifier("editor.subtitles.error")
             }
             referenceSection.disabled(controller.isBusy)
-            if !document.words.isEmpty {
+            if !document.words.isEmpty || !document.cues.isEmpty {
                 styleSection.disabled(controller.isBusy)
                 if document.generationSignature != nil,
                    document.generationSignature != EditorSubtitleController.audioSignature(for: editorStore.project) {
-                    Text(appLocalized("声音来源或对齐已改变，建议重新生成字幕"))
+                    Text(appLocalized("声音来源或剪辑已改变，请检查字幕时间；重新生成会替换现有字幕"))
                         .font(.appUI(.caption)).foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if selectedCue != nil { editingSection.disabled(controller.isBusy) }
                 subtitleList.disabled(controller.isBusy)
+                if !unassigned.isEmpty { unassignedList.disabled(controller.isBusy) }
             }
         }
         .sheet(isPresented: $showsAISettings) { SubtitleAISettingsSheet() }
-        .onAppear { syncReferences(); refreshRows() }
+        .preference(key: AppScrollRevealPreferenceKey.self, value: navigation.revealRequest)
+        .onAppear {
+            syncReferences()
+            refreshRows()
+            navigation.connect(to: playbackController)
+        }
+        .onReceive(scrollActivity?.userInteractions.eraseToAnyPublisher() ?? Empty<Void, Never>().eraseToAnyPublisher()) { _ in
+            navigation.suspendFollowing()
+        }
+        .onReceive(navigation.timelineNavigations) { _ in
+            guard applyDraft() else { return }
+            if subtitleFocus != nil { subtitleFocus = nil }
+            editing.cancel()
+            splitBoundary = nil
+            navigation.resumeFollowing()
+        }
+        .onReceive(navigation.resumeRequests) { _ in
+            guard applyDraft() else { return }
+            subtitleFocus = nil
+            editing.cancel()
+            navigation.resumeFollowing()
+        }
+        .onReceive(navigation.unassignedRequests) { _ in
+            guard applyDraft() else { return }
+            navigation.suspendFollowing()
+            navigation.reveal(navigation.unassignedSectionID)
+        }
+        .onChange(of: subtitleFocus) { old, new in
+            if new != nil { navigation.suspendFollowing() }
+            if old != nil, new == nil, !applyDraft() {
+                subtitleFocus = old
+            }
+        }
+        .onExitCommand {
+            guard editing.draft != nil else { return }
+            editing.cancel()
+            subtitleFocus = nil
+            splitBoundary = nil
+            operationError = nil
+        }
         .onChange(of: referenceFocus) { old, new in
             if old != nil, old != new { commitReferences() }
         }
@@ -92,16 +144,16 @@ struct EditorSubtitleInspector: View {
         .onChange(of: editorStore.project.subtitles.theme) { _, _ in
             if referenceFocus != .theme { themeDraft = document.theme }
         }
-        .onChange(of: editorStore.project.subtitles.cues) { _, _ in
-            refreshRows()
-            if let row = selectedRow ?? resolved.first(where: { $0.cueID == selectedID }) {
-                select(row, seek: false)
-            } else { clearSelection() }
-        }
+        .onChange(of: editorStore.project.subtitles.cues) { _, _ in refreshRows() }
         .onChange(of: editorStore.project.subtitles.words) { _, _ in refreshRows() }
-        .onChange(of: editorStore.project.timeline.sourceSequence) { _, _ in refreshRows(); clearSelection() }
-        .onChange(of: sourceDuration) { _, _ in refreshRows(); clearSelection() }
-        .onDisappear { styleEditingChanged(false); commitReferences() }
+        .onChange(of: editorStore.project.timeline.sourceSequence) { _, _ in refreshRows() }
+        .onChange(of: sourceDuration) { _, _ in refreshRows() }
+        .onDisappear {
+            _ = applyDraft()
+            styleEditingChanged(false)
+            commitReferences()
+            navigation.disconnect()
+        }
         .accessibilityIdentifier("editor.subtitles.inspector")
     }
 
@@ -123,6 +175,7 @@ struct EditorSubtitleInspector: View {
                     .disabled(!canGenerate || controller.isBusy)
                     .accessibilityIdentifier("editor.subtitles.generate")
                 Button(appLocalized("AI 校对")) {
+                    guard applyDraft() else { return }
                     styleEditingChanged(false)
                     commitReferences()
                     controller.correct(store: editorStore)
@@ -145,7 +198,7 @@ struct EditorSubtitleInspector: View {
             } else if !canGenerate {
                 hint("所选声音来源没有可识别的音轨")
             }
-            if !document.words.isEmpty {
+            if !document.words.isEmpty || !document.cues.isEmpty {
                 hint("重新生成会替换现有字幕；AI 校对保留手工修改。所有修改均可撤销")
                 Button(appLocalized("导出 SRT"), systemImage: "square.and.arrow.up") { exportSRT() }
                     .buttonStyle(.editorQuiet).disabled(resolved.isEmpty || controller.isBusy)
@@ -201,22 +254,40 @@ struct EditorSubtitleInspector: View {
     }
 
     private var editingSection: some View {
-        EditorInspectorSection("编辑字幕") {
-            TextEditor(text: $textDraft).font(.appUI(size: 14)).scrollContentBackground(.hidden)
+        VStack(alignment: .leading, spacing: 10) {
+            TextEditor(text: draftBinding(\.text)).font(.appUI(size: 14)).scrollContentBackground(.hidden)
                 .frame(height: 82).padding(8)
                 .background(EditorTheme.chrome(0.035), in: RoundedRectangle(cornerRadius: 8))
                 .accessibilityLabel(appLocalized("字幕文字"))
-            HStack(spacing: 8) {
-                timeField("开始", text: $startDraft)
-                timeField("结束", text: $endDraft)
-                Button(appLocalized("应用")) { applyDraft() }.buttonStyle(.editorPrimary)
+                .accessibilityIdentifier("editor.subtitles.inline.text")
+                .focused($subtitleFocus, equals: .text)
+            if selectedRow != nil {
+                HStack(spacing: 8) {
+                    timeField("开始", text: draftBinding(\.start), field: .start)
+                    timeField("结束", text: draftBinding(\.end), field: .end)
+                }
+            }
+            if let message = editing.errorMessage ?? operationError {
+                Text(message).font(.appUI(.caption)).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("editor.subtitles.inline.error")
+            }
+            HStack {
+                Text(appLocalized("失焦自动保存 · Esc 取消"))
+                    .font(.appUI(.caption2)).foregroundStyle(EditorTheme.secondaryText)
+                Spacer(minLength: 4)
+                Button(appLocalized("完成")) {
+                    if applyDraft() { subtitleFocus = nil; editing.cancel(); splitBoundary = nil }
+                }
+                .buttonStyle(.editorQuiet)
+                .keyboardShortcut(.return, modifiers: .command)
             }
             HStack {
                 Button(appLocalized("拆分")) { prepareSplit() }
-                    .disabled(selectedCue == nil)
+                    .disabled(selectedRow == nil)
                 Button(appLocalized("与下一条合并")) { mergeNext() }.disabled(nextRow == nil)
                 Spacer()
-                Button { editSelected("删除字幕") { document, id in try document.updateCueText(id: id, text: "") } }
+                Button { deleteSelected() }
                     label: { Image(systemName: "trash") }
                     .accessibilityLabel(appLocalized("删除字幕"))
             }
@@ -249,28 +320,82 @@ struct EditorSubtitleInspector: View {
                 Spacer()
                 Text("\(resolved.count)").font(.appUI(.caption)).foregroundStyle(EditorTheme.secondaryText)
             }
-            LazyVStack(spacing: 5) {
+            LazyVStack(spacing: 6) {
                 ForEach(resolved) { row in
-                    Button { select(row) } label: {
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack {
-                                Text(String(format: "%.2f – %.2f", row.startTime, row.endTime))
-                                    .font(.appUI(size: 10, design: .monospaced))
-                                    .foregroundStyle(EditorTheme.secondaryText)
-                                Spacer()
-                                if row.requiresReview {
-                                    Text(appLocalized("待复核")).font(.appUI(size: 10)).foregroundStyle(.orange)
-                                }
-                            }
-                            Text(row.text).font(.appUI(size: 12)).foregroundStyle(EditorTheme.primaryText)
-                                .lineLimit(3).multilineTextAlignment(.leading)
-                        }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
-                            .background(selectedFragmentID == row.id ? EditorTheme.selectionWash : EditorTheme.chrome(0.035),
-                                        in: RoundedRectangle(cornerRadius: 8))
-                    }.buttonStyle(.plain)
-                        .accessibilityLabel("\(row.startTime), \(row.text)")
+                    cueCard(cueID: row.cueID, text: row.text, row: row)
+                        .id(row.cueID)
                 }
             }
+        }
+    }
+
+    private var unassignedList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(String(format: appLocalized("未分配字幕 · %d"), unassigned.count))
+                .font(EditorTypography.panelTitle)
+            hint("这些字幕的对应片段已被剪掉。文字仍保留，暂不显示或导出。")
+            LazyVStack(spacing: 6) {
+                ForEach(unassigned) { cue in
+                    cueCard(cueID: cue.id, text: cue.text, row: nil).id(cue.id)
+                }
+            }
+        }
+        .id(navigation.unassignedSectionID)
+        .accessibilityIdentifier("editor.subtitles.unassigned")
+    }
+
+    private func cueCard(cueID: UUID, text: String, row: ResolvedSubtitleCue?) -> some View {
+        let isSelected = selectedID == cueID
+        let isActive = navigation.activeCueID == cueID
+        return VStack(alignment: .leading, spacing: 8) {
+            Button { select(cueID, row: row) } label: {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        if let row {
+                            Text(String(format: "%.2f – %.2f", row.startTime, row.endTime))
+                                .font(.appUI(size: 10, design: .monospaced))
+                                .foregroundStyle(EditorTheme.secondaryText)
+                        } else {
+                            Text(appLocalized("未分配")).font(.appUI(size: 10)).foregroundStyle(.orange)
+                        }
+                        Spacer(minLength: 0)
+                        if isActive {
+                            Image(systemName: "play.fill").font(.appUI(size: 9))
+                                .accessibilityLabel(appLocalized("当前字幕"))
+                        }
+                    }
+                    if !isSelected {
+                        Text(text).font(.appUI(size: 13)).foregroundStyle(EditorTheme.primaryText)
+                            .lineLimit(3).multilineTextAlignment(.leading)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(text)
+            .accessibilityIdentifier("editor.subtitles.row.\(cueID.uuidString)")
+            if let row, row.isTooShort || row.requiresReview {
+                Text(appLocalized(row.isTooShort ? "时间过短，需调整"
+                    : row.wasRearranged ? "重排后需复核" : "剪辑后文字已保留，可检查显示时间"))
+                    .font(.appUI(size: 10)).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if isSelected { editingSection }
+            if row == nil {
+                Button(appLocalized("放到播放头")) { place(cueID) }
+                    .buttonStyle(.editorQuiet)
+                    .accessibilityIdentifier("editor.subtitles.place.\(cueID.uuidString)")
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(isSelected || isActive ? EditorTheme.selectionWash : EditorTheme.chrome(0.035),
+                    in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(isActive ? EditorTheme.selectionTint.opacity(0.65) : .clear, lineWidth: 1)
+                .allowsHitTesting(false)
         }
     }
 
@@ -278,23 +403,27 @@ struct EditorSubtitleInspector: View {
         Text(appLocalized(key)).font(.appUI(.caption2)).foregroundStyle(EditorTheme.secondaryText)
             .fixedSize(horizontal: false, vertical: true)
     }
-    private func timeField(_ key: String, text: Binding<String>) -> some View {
+    private func timeField(_ key: String, text: Binding<String>, field: SubtitleField) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(appLocalized(key)).font(.appUI(.caption2)).foregroundStyle(EditorTheme.secondaryText)
             TextField("0.000", text: text).textFieldStyle(.roundedBorder)
                 .font(.appUI(size: 11, design: .monospaced)).accessibilityLabel(appLocalized(key))
+                .focused($subtitleFocus, equals: field)
+                .onSubmit { _ = applyDraft() }
         }
     }
     private func syncReferences() { scriptDraft = document.script; themeDraft = document.theme }
     private func refreshRows() {
         resolvedRows = (try? document.resolvedCues(timeline: editorStore.project.timeline, sourceDuration: sourceDuration)) ?? []
+        editing.reconcile(project: editorStore.project, sourceDuration: sourceDuration)
+        navigation.update(rows: resolvedRows, unassignedCount: unassigned.count)
     }
-    private func clearSelection() { selectedID = nil; selectedFragmentID = nil; splitBoundary = nil }
     private func commitReferences() {
         guard !controller.isBusy, scriptDraft != document.script || themeDraft != document.theme else { return }
         edit("修改字幕校对参考") { $0.script = scriptDraft; $0.theme = themeDraft }
     }
     private func generate(downloadModel: Bool = false) {
+        guard applyDraft() else { return }
         styleEditingChanged(false)
         commitReferences()
         guard let media = mediaSession.prepared else { return }
@@ -308,7 +437,8 @@ struct EditorSubtitleInspector: View {
             try editorStore.replaceProject(with: project, actionName: name)
             return true
         } catch {
-            controller.errorMessage = appErrorDescription(error)
+            if selectedID != nil { operationError = appErrorDescription(error) }
+            else { controller.errorMessage = appErrorDescription(error) }
             return false
         }
     }
@@ -332,35 +462,65 @@ struct EditorSubtitleInspector: View {
         editorStore.updateInteraction { update(&$0.subtitles.style) }
     }
     private func select(_ row: ResolvedSubtitleCue, seek: Bool = true) {
-        selectedID = row.cueID
-        selectedFragmentID = row.id
-        textDraft = row.text
-        startDraft = String(format: "%.3f", row.startTime)
-        endDraft = String(format: "%.3f", row.endTime)
-        splitBoundary = nil
-        if seek { playbackController.seek(to: row.startTime) }
+        select(row.cueID, row: row, seek: seek)
     }
-    private func applyDraft() {
-        guard selectedID != nil, let start = Double(startDraft), let end = Double(endDraft) else {
-            controller.errorMessage = appLocalized("请输入有效的字幕起止时间")
+
+    private func select(_ id: UUID, row: ResolvedSubtitleCue?, seek: Bool = true) {
+        guard let cue = document.cues.first(where: { $0.id == id }),
+              editing.select(cue, row: row, store: editorStore, sourceDuration: sourceDuration) else { return }
+        operationError = nil
+        splitBoundary = nil
+        navigation.suspendFollowing()
+        if seek, let row { playbackController.seek(to: row.startTime, navigationOrigin: .subtitle) }
+        if seek {
+            navigation.reveal(id)
+            subtitleFocus = .text
+        }
+    }
+
+    @discardableResult
+    private func applyDraft() -> Bool {
+        let wasDirty = editing.draft?.isDirty == true
+        let succeeded = editing.commit(store: editorStore, sourceDuration: sourceDuration)
+        if succeeded, wasDirty { refreshRows() }
+        return succeeded
+    }
+
+    private func deleteSelected() {
+        guard let id = selectedID, applyDraft() else { return }
+        if edit("删除字幕", { try $0.updateCueText(id: id, text: "") }) {
+            editing.cancel()
+            subtitleFocus = nil
+            splitBoundary = nil
+            refreshRows()
+        }
+    }
+
+    private func place(_ id: UUID) {
+        guard let cue = document.cues.first(where: { $0.id == id }),
+              editing.select(cue, row: nil, store: editorStore, sourceDuration: sourceDuration),
+              applyDraft() else { return }
+        navigation.suspendFollowing()
+        if resolved.contains(where: { playbackController.outputTime >= $0.startTime && playbackController.outputTime < $0.endTime }) {
+            operationError = appLocalized("播放头位置已有字幕，请选择空白位置")
             return
         }
-        guard let row = selectedRow else { return }
-        editSelected("编辑字幕") { document, id in
-            try document.updateCueText(id: id, text: textDraft)
-            if abs(start - row.startTime) > 0.0005 || abs(end - row.endTime) > 0.0005 {
-                try document.updateCueTiming(id: id,
-                    outputTimeRange: SubtitleTimeRange(start: start, end: end),
-                    timeline: editorStore.project.timeline, sourceDuration: sourceDuration)
-            }
+        operationError = nil
+        if edit("放置字幕", { try $0.placeCue(id: id, atOutputTime: playbackController.outputTime,
+            timeline: editorStore.project.timeline, sourceDuration: sourceDuration) }) {
+            editing.cancel()
+            refreshRows()
+            if let row = resolved.first(where: { $0.cueID == id }) { select(row, seek: false); navigation.reveal(id) }
         }
     }
+
     private var nextRow: ResolvedSubtitleCue? {
-        guard let index = resolved.firstIndex(where: { $0.id == selectedFragmentID }),
+        guard let index = resolved.firstIndex(where: { $0.cueID == selectedID }),
               resolved.indices.contains(index + 1) else { return nil }
         return resolved[index + 1]
     }
     private func mergeNext() {
+        guard applyDraft() else { return }
         guard let row = selectedRow, let next = nextRow else { return }
         var target = row.cueID
         let didMerge = edit("合并字幕") { document in
@@ -381,7 +541,7 @@ struct EditorSubtitleInspector: View {
     }
     @discardableResult
     private func editSelected(_ name: String, _ update: (inout SubtitleDocument, UUID) throws -> Void) -> Bool {
-        guard let row = selectedRow else { return false }
+        guard applyDraft(), let row = selectedRow else { return false }
         var target = row.cueID
         let didEdit = edit(name) { document in
             if row.requiresReview || resolved.filter({ $0.cueID == row.cueID }).count > 1 {
@@ -392,11 +552,11 @@ struct EditorSubtitleInspector: View {
         guard didEdit else { return false }
         refreshRows()
         if let row = resolved.first(where: { $0.cueID == target }) { select(row, seek: false) }
-        else { clearSelection() }
+        else { editing.cancel(); splitBoundary = nil }
         return true
     }
     private func prepareSplit() {
-        guard selectedCue != nil, let row = selectedRow else { return }
+        guard applyDraft(), selectedCue != nil, let row = selectedRow else { return }
         let playhead = playbackController.outputTime
         let boundary = playhead > row.startTime && playhead < row.endTime
             ? playhead : (row.startTime + row.endTime) / 2
@@ -408,6 +568,7 @@ struct EditorSubtitleInspector: View {
         secondSplitText = String(characters[textBoundary...])
     }
     private func exportSRT() {
+        guard applyDraft() else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [UTType(filenameExtension: "srt") ?? .plainText]
         panel.nameFieldStringValue = "\(editorStore.project.title).srt"
