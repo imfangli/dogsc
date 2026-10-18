@@ -80,6 +80,7 @@ struct ExportSheet: View {
     @State private var outputNameError: String?
     @FocusState private var outputNameFocused: Bool
     @State private var selectedOutputKind: ExportOutputKind = .video
+    @State private var exportsSubtitles = false
     @State private var showsSupportSheet = false
     @State private var didPrepareOutput = false
 
@@ -135,6 +136,7 @@ struct ExportSheet: View {
                             Text("导出剪辑后的系统声音与麦克风混音。")
                                 .font(.appUI(size: 12)).foregroundStyle(.secondary)
                         }
+                        exportSubtitleOption
                     }
                     .padding(1)
                     .padding(.bottom, 8)
@@ -180,6 +182,11 @@ struct ExportSheet: View {
             exporter.resetResultForNewExportSelection()
             refreshSuggestedOutputURL()
         }
+        .onChange(of: exportsSubtitles) { _, _ in
+            guard !exporter.isExporting else { return }
+            exporter.resetResultForNewExportSelection()
+            refreshSuggestedOutputURL()
+        }
         .sheet(isPresented: $showsSupportSheet) { AppSupportSheet() }
     }
 
@@ -204,7 +211,10 @@ struct ExportSheet: View {
                 .accessibilityIdentifier("export.completed.support")
                 .accessibilityHint("打开赞赏码")
 
-                Button { NSWorkspace.shared.activateFileViewerSelecting([url]) } label: {
+                Button {
+                    let files = [url] + [exporter.lastSubtitleExportURL].compactMap { $0 }
+                    NSWorkspace.shared.activateFileViewerSelecting(files)
+                } label: {
                     Label { Text("在 Finder 中显示") } icon: { AppLineIcon(kind: .folder, size: 16) }
                         .fixedSize().frame(height: 34)
                 }
@@ -268,7 +278,7 @@ struct ExportSheet: View {
     }
 
     private var exportContentHeight: CGFloat {
-        if selectedOutputKind == .video { return 460 }
+        if selectedOutputKind == .video { return 528 }
         return exportScope.outputRange == nil ? 356 : 400
     }
 
@@ -384,6 +394,9 @@ struct ExportSheet: View {
                     exportSummaryRow("分辨率", value: exportDimensionsText)
                     exportSummaryRow("帧率", value: "\(editorStore.project.exportSettings.frameRate.rawValue) fps")
                 }
+                if includesSRT {
+                    exportSummaryRow("字幕", value: "SRT")
+                }
                 exportSummaryRow("时长", value: Self.exportTimecode(exportScope.outputRange?.duration ?? mediaSession.outputDuration))
             }
             .accessibilityElement(children: .ignore)
@@ -431,9 +444,10 @@ struct ExportSheet: View {
     private var outputConfigurationSummary: String {
         let duration = exportScope.outputRange?.duration ?? mediaSession.outputDuration
         let time = Self.exportTimecode(duration)
-        guard selectedOutputKind == .video else { return "M4A · \(time)" }
+        let subtitles = includesSRT ? " · SRT" : ""
+        guard selectedOutputKind == .video else { return "M4A\(subtitles) · \(time)" }
         let size = mediaSession.sourceDisplaySize
-        guard size.width > 0, size.height > 0 else { return "MP4 · \(time)" }
+        guard size.width > 0, size.height > 0 else { return "MP4\(subtitles) · \(time)" }
         let crop = editorStore.project.canvas.crop.clamped()
         let settings = editorStore.project.exportSettings
         let dimensions = editorStore.project.canvas.pixelDimensions(
@@ -441,7 +455,7 @@ struct ExportSheet: View {
             sourceAspectRatio: Double(size.width / size.height) * crop.width / crop.height,
             sourcePixelSize: CanvasDimensions(width: max(Int(size.width.rounded()), 2), height: max(Int(size.height.rounded()), 2))
         )
-        return "\(dimensions.width) × \(dimensions.height) px · \(settings.frameRate.rawValue) fps · \(time) · MP4"
+        return "\(dimensions.width) × \(dimensions.height) px · \(settings.frameRate.rawValue) fps · \(time) · MP4\(subtitles)"
     }
 
     private var exportResolutionChoices: some View {
@@ -470,6 +484,35 @@ struct ExportSheet: View {
             )
             .disabled(exporter.isExporting)
         }
+    }
+
+    private var exportSubtitleOption: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            EditorToggle(isOn: $exportsSubtitles, title: "同时导出 SRT")
+                .disabled(exporter.isExporting || !hasExportableSubtitles)
+                .accessibilityIdentifier("export.subtitles.srt")
+            Text(appLocalized(hasExportableSubtitles
+                ? "字幕文件与成片同名，保存在同一文件夹。"
+                : "当前导出范围没有字幕"))
+                .font(.appUI(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var hasExportableSubtitles: Bool {
+        guard let plan = mediaSession.mediaPlan,
+              let contents = try? EditorSubtitleExport.contents(
+                project: editorStore.project,
+                sourceDuration: plan.timelineMap.fullSourceDuration,
+                outputDuration: plan.outputDuration,
+                outputRange: exportScope.outputRange
+              ) else { return false }
+        return !contents.isEmpty
+    }
+
+    private var includesSRT: Bool {
+        exportsSubtitles && hasExportableSubtitles
     }
 
     @ViewBuilder
@@ -689,6 +732,7 @@ struct ExportSheet: View {
                 ),
                 outputURL: outputURL,
                 outputKind: selectedOutputKind,
+                exportsSubtitles: includesSRT,
                 outputRange: exportScope.outputRange
             )
             exporter.export(request: request)
@@ -709,13 +753,15 @@ struct ExportSheet: View {
                 selectedOutputURL = try EditorExportRequestBuilder.makeOutputURL(
                     in: directory,
                     baseName: customOutputBaseName,
-                    outputKind: selectedOutputKind
+                    outputKind: selectedOutputKind,
+                    includesSRT: includesSRT
                 )
             } else {
                 selectedOutputURL = try EditorExportRequestBuilder.makeDefaultOutputURL(
                     for: editorStore.project,
                     preferredProjectName: suggestedProjectName,
                     outputKind: selectedOutputKind,
+                    includesSRT: includesSRT,
                     directoryURL: directory
                 )
             }

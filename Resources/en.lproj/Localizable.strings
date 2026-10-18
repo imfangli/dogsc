@@ -1044,6 +1044,9 @@
 "文件名" = "File Name";
 "视频成片" = "Video";
 "仅音频" = "Audio Only";
+"同时导出 SRT" = "Also Export SRT";
+"字幕文件与成片同名，保存在同一文件夹。" = "Save the SRT alongside the export with the same filename.";
+"当前导出范围没有字幕" = "There are no subtitles in the export range";
 "当前画面" = "Current Frame";
 "音频导出" = "Audio Export";
 "格式" = "Format";

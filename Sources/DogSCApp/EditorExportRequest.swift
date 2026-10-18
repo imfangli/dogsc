@@ -129,6 +129,12 @@ struct EditorExportAssets: Equatable, Sendable {
     }
 }
 
+/// Subtitle text and its destination frozen with the media export snapshot.
+struct EditorSubtitleExportFile: Equatable, Sendable {
+    let outputURL: URL
+    let contents: String
+}
+
 /// Immutable value handed across the main-actor/worker boundary. It contains
 /// only Sendable value snapshots: no AVAsset, AVAssetTrack or prepared preview
 /// composition is allowed to escape into the export worker.
@@ -141,6 +147,7 @@ struct EditorExportRequest: Equatable, Sendable {
     let outputURL: URL
     let outputKind: ExportOutputKind
     let outputRange: MediaTimeRange?
+    let subtitleExport: EditorSubtitleExportFile?
 
     fileprivate init(
         editorSessionID: EditorSessionID,
@@ -150,7 +157,8 @@ struct EditorExportRequest: Equatable, Sendable {
         assets: EditorExportAssets,
         outputURL: URL,
         outputKind: ExportOutputKind,
-        outputRange: MediaTimeRange?
+        outputRange: MediaTimeRange?,
+        subtitleExport: EditorSubtitleExportFile?
     ) {
         self.editorSessionID = editorSessionID
         self.mediaGeneration = mediaGeneration
@@ -160,6 +168,7 @@ struct EditorExportRequest: Equatable, Sendable {
         self.outputURL = outputURL
         self.outputKind = outputKind
         self.outputRange = outputRange
+        self.subtitleExport = subtitleExport
     }
 }
 
@@ -175,6 +184,7 @@ enum EditorExportRequestError: LocalizedError, Equatable, Sendable {
     case invalidOutputURL(String)
     case outputCollidesWithInput(String)
     case invalidOutputRange
+    case noSubtitlesToExport
 
     var errorDescription: String? {
         switch self {
@@ -200,6 +210,8 @@ enum EditorExportRequestError: LocalizedError, Equatable, Sendable {
             return "导出位置不能覆盖项目素材：\(path)。"
         case .invalidOutputRange:
             return "所选片段已经变化，无法确定有效的导出范围。请重新选择片段。"
+        case .noSubtitlesToExport:
+            return "当前导出范围没有字幕，请先生成字幕或取消同时导出 SRT。"
         }
     }
 }
@@ -214,6 +226,7 @@ enum EditorExportRequestBuilder {
         stickerURLs: [String: URL] = [:],
         outputURL: URL? = nil,
         outputKind: ExportOutputKind = .video,
+        exportsSubtitles: Bool = false,
         outputRange: MediaTimeRange? = nil
     ) throws -> EditorExportRequest {
         let preparedRequest = preparedMedia.request
@@ -278,7 +291,8 @@ enum EditorExportRequestBuilder {
 
         let resolvedOutputURL = try (outputURL ?? makeDefaultOutputURL(
             for: project,
-            outputKind: outputKind
+            outputKind: outputKind,
+            includesSRT: exportsSubtitles
         ))
             .standardizedFileURL
         guard resolvedOutputURL.isFileURL else {
@@ -328,6 +342,29 @@ enum EditorExportRequestBuilder {
             validatedOutputRange = nil
         }
 
+        let subtitleExport: EditorSubtitleExportFile?
+        if exportsSubtitles {
+            let subtitleURL = EditorSubtitleExport.outputURL(for: resolvedOutputURL)
+            guard !ExportFileTransaction.collides(
+                outputURL: subtitleURL,
+                inputURLs: assets.inputURLs + [resolvedOutputURL]
+            ) else {
+                throw EditorExportRequestError.outputCollidesWithInput(subtitleURL.path)
+            }
+            let contents = try EditorSubtitleExport.contents(
+                project: project,
+                sourceDuration: currentMediaPlan.timelineMap.fullSourceDuration,
+                outputDuration: currentMediaPlan.outputDuration,
+                outputRange: validatedOutputRange
+            )
+            guard !contents.isEmpty else {
+                throw EditorExportRequestError.noSubtitlesToExport
+            }
+            subtitleExport = EditorSubtitleExportFile(outputURL: subtitleURL, contents: contents)
+        } else {
+            subtitleExport = nil
+        }
+
         return EditorExportRequest(
             editorSessionID: editorSessionID,
             mediaGeneration: mediaGeneration,
@@ -336,7 +373,8 @@ enum EditorExportRequestBuilder {
             assets: assets,
             outputURL: resolvedOutputURL,
             outputKind: outputKind,
-            outputRange: validatedOutputRange
+            outputRange: validatedOutputRange,
+            subtitleExport: subtitleExport
         )
     }
 
@@ -344,6 +382,7 @@ enum EditorExportRequestBuilder {
         for project: RecorderProject,
         preferredProjectName: String? = nil,
         outputKind: ExportOutputKind = .video,
+        includesSRT: Bool = false,
         directoryURL: URL? = nil
     ) throws -> URL {
         let folder = directoryURL ?? AppPreferences.exportDirectoryURL
@@ -364,7 +403,8 @@ enum EditorExportRequestBuilder {
         return try makeOutputURL(
             in: folder,
             baseName: baseName,
-            outputKind: outputKind
+            outputKind: outputKind,
+            includesSRT: includesSRT
         )
     }
 
@@ -373,7 +413,8 @@ enum EditorExportRequestBuilder {
     static func makeOutputURL(
         in folder: URL,
         baseName: String,
-        outputKind: ExportOutputKind
+        outputKind: ExportOutputKind,
+        includesSRT: Bool = false
     ) throws -> URL {
         guard let baseName = exportFileNameComponent(baseName) else {
             throw EditorExportRequestError.invalidOutputURL(baseName)
@@ -386,7 +427,10 @@ enum EditorExportRequestBuilder {
             "\(baseName).\(outputKind.fileExtension)"
         )
         var suffix = 2
-        while FileManager.default.fileExists(atPath: candidate.path) {
+        while FileManager.default.fileExists(atPath: candidate.path)
+            || (includesSRT && FileManager.default.fileExists(
+                atPath: EditorSubtitleExport.outputURL(for: candidate).path
+            )) {
             candidate = folder.appendingPathComponent(
                 "\(baseName)-\(suffix).\(outputKind.fileExtension)"
             )

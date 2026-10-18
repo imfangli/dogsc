@@ -18,6 +18,8 @@ final class SubtitleVideoExportTests: XCTestCase {
         let project = captionProject()
         let output = folder.appendingPathComponent("subtitles-full.mp4")
         try await export(project: project, source: source, output: output)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: EditorSubtitleExport.outputURL(for: output).path),
+            "Exporting subtitles alongside video is opt-in")
         let decoded = try await readVideo(output, frameIndices: [3, 6, 12, 18, 24])
         XCTAssertEqual(decoded.count, 30)
         XCTAssertEqual(decoded.duration, 1, accuracy: 1.0 / 30)
@@ -48,7 +50,10 @@ final class SubtitleVideoExportTests: XCTestCase {
         var project = captionProject()
         let selectedOutput = folder.appendingPathComponent("subtitles-selected-range.mp4")
         let selection = try XCTUnwrap(MediaTimeRange(start: 0.3, duration: 0.5))
-        try await export(project: project, source: source, output: selectedOutput, range: selection)
+        try await export(project: project, source: source, output: selectedOutput, range: selection,
+            exportsSubtitles: true)
+        XCTAssertEqual(try String(contentsOf: EditorSubtitleExport.outputURL(for: selectedOutput), encoding: .utf8),
+            "1\n00:00:00,000 --> 00:00:00,300\n字幕测试\n")
         let selected = try await readVideo(selectedOutput, frameIndices: [3, 12])
         XCTAssertEqual(selected.count, 15)
         XCTAssertEqual(selected.duration, 0.5, accuracy: 1.0 / 30)
@@ -59,7 +64,9 @@ final class SubtitleVideoExportTests: XCTestCase {
             "Output 0.4 seconds is project 0.7 seconds, after the caption")
         project.subtitles.enabled = false
         let disabledOutput = folder.appendingPathComponent("subtitles-disabled.mp4")
-        try await export(project: project, source: source, output: disabledOutput)
+        try await export(project: project, source: source, output: disabledOutput, exportsSubtitles: true)
+        XCTAssertEqual(try String(contentsOf: EditorSubtitleExport.outputURL(for: disabledOutput), encoding: .utf8),
+            "1\n00:00:00,200 --> 00:00:00,600\n字幕测试\n")
         let disabled = try await readVideo(disabledOutput, frameIndices: [12])
         XCTAssertEqual(disabled.count, 30)
         let clean = try XCTUnwrap(disabled.frames[12])
@@ -67,6 +74,30 @@ final class SubtitleVideoExportTests: XCTestCase {
         XCTAssertEqual(clean.translucentBackdropPixels, 0)
         try retainArtifact(selectedOutput, name: "subtitles-selected-range.mp4")
         try retainArtifact(disabledOutput, name: "subtitles-disabled.mp4")
+    }
+
+    func testCompanionCannotOverwriteSourceThroughSymlink() async throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let source = folder.appendingPathComponent("screen.mp4")
+        try await writeSolidVideo(to: source)
+        let project = captionProject()
+        let session = EditorSessionID()
+        let mediaRequest = EditorMediaRequest(editorSessionID: session,
+            sourceURL: source, cameraURL: nil, microphoneURL: nil,
+            sourceSequence: project.timeline.sourceSequence, mediaManifest: project.media, pointerEvents: [])
+        let payload = try await TimelinePreviewCompositionLoader.prepare(request: mediaRequest)
+        let prepared = EditorPreparedMedia(generation: 1, request: mediaRequest, payload: payload)
+        let output = folder.appendingPathComponent("output.mp4")
+        let subtitleURL = EditorSubtitleExport.outputURL(for: output)
+        try FileManager.default.createSymbolicLink(at: subtitleURL, withDestinationURL: source)
+        XCTAssertThrowsError(try EditorExportRequestBuilder.make(editorSessionID: session,
+            mediaGeneration: 1, project: project, preparedMedia: prepared,
+            wallpaperURL: nil, outputURL: output, exportsSubtitles: true)) { error in
+            XCTAssertEqual(error as? EditorExportRequestError, .outputCollidesWithInput(subtitleURL.path))
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: output.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
     }
 
     private func captionProject() -> RecorderProject {
@@ -85,7 +116,7 @@ final class SubtitleVideoExportTests: XCTestCase {
     }
 
     private func export(project: RecorderProject, source: URL, output: URL,
-        range: MediaTimeRange? = nil) async throws {
+        range: MediaTimeRange? = nil, exportsSubtitles: Bool = false) async throws {
         let session = EditorSessionID()
         let mediaRequest = EditorMediaRequest(editorSessionID: session,
             sourceURL: source, cameraURL: nil, microphoneURL: nil,
@@ -94,7 +125,23 @@ final class SubtitleVideoExportTests: XCTestCase {
         let prepared = EditorPreparedMedia(generation: 1, request: mediaRequest, payload: payload)
         let request = try EditorExportRequestBuilder.make(editorSessionID: session,
             mediaGeneration: 1, project: project, preparedMedia: prepared,
-            wallpaperURL: nil, outputURL: output, outputRange: range)
+            wallpaperURL: nil, outputURL: output, exportsSubtitles: exportsSubtitles, outputRange: range)
+        if exportsSubtitles {
+            let subtitleURL = EditorSubtitleExport.outputURL(for: output).standardizedFileURL
+            XCTAssertEqual(request.subtitleExport?.outputURL, subtitleURL)
+            XCTAssertEqual(request.subtitleExport?.contents, try EditorSubtitleExport.contents(
+                project: project, sourceDuration: request.mediaPlan.timelineMap.fullSourceDuration,
+                outputDuration: request.mediaPlan.outputDuration, outputRange: range))
+            var withoutSubtitles = project
+            withoutSubtitles.subtitles = SubtitleDocument()
+            XCTAssertThrowsError(try EditorExportRequestBuilder.make(editorSessionID: session,
+                mediaGeneration: 1, project: withoutSubtitles, preparedMedia: prepared,
+                wallpaperURL: nil, outputURL: output, exportsSubtitles: true, outputRange: range)) { error in
+                XCTAssertEqual(error as? EditorExportRequestError, .noSubtitlesToExport)
+            }
+        } else {
+            XCTAssertNil(request.subtitleExport)
+        }
         let exporter = VideoExporter()
         let defaults = UserDefaults.standard
         let soundKey = AppPreferences.exportCompletionSoundEnabledKey
@@ -120,10 +167,13 @@ final class SubtitleVideoExportTests: XCTestCase {
         }
         XCTAssertNil(exporter.errorMessage)
         XCTAssertEqual(exporter.lastExportURL, output.standardizedFileURL)
+        XCTAssertEqual(exporter.lastSubtitleExportURL, request.subtitleExport?.outputURL)
         XCTAssertEqual(exporter.exportProgress, 1)
         guard FileManager.default.fileExists(atPath: output.path) else {
             throw SubtitleExportTestError.missingOutput
         }
+        XCTAssertEqual(FileManager.default.fileExists(atPath: EditorSubtitleExport.outputURL(for: output).path),
+            exportsSubtitles)
     }
 
     private func writeSolidVideo(to url: URL) async throws {

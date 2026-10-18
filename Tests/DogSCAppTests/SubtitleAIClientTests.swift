@@ -65,7 +65,7 @@ final class SubtitleAIClientTests: XCTestCase {
     }
 
     func testDefaultBatchLimitsAndAbsoluteIDsMapBackToOriginalWords() async throws {
-        let words = makeWords((0..<100).map { "字\($0)" })
+        let words = makeWords((0..<600).map { "字\($0)" + ([255, 511].contains($0) ? "。" : "") })
         let transport = SubtitleStubTransport { request, _ in
             try subtitleResponse(groups: [.init(unitIDs: subtitleUnitIDs(request), text: "校对结果")])
         }
@@ -73,8 +73,8 @@ final class SubtitleAIClientTests: XCTestCase {
             script: "", theme: "", configuration: configuration)
         XCTAssertEqual(groups.flatMap(\.wordIDs), words.map(\.id))
         let requests = await transport.requests
-        XCTAssertEqual(try requests.map { try subtitleUnitIDs($0).count }, [48, 48, 4])
-        XCTAssertEqual(try requests.map(subtitleUnitIDs).flatMap { $0 }, Array(1...100))
+        XCTAssertEqual(try requests.map { try subtitleUnitIDs($0).count }, [256, 256, 88])
+        XCTAssertEqual(try requests.map(subtitleUnitIDs).flatMap { $0 }, Array(1...600))
         XCTAssertTrue(requests.allSatisfy { request in
             guard let body = request.httpBody else { return false }
             let text = String(decoding: body, as: UTF8.self)
@@ -83,7 +83,7 @@ final class SubtitleAIClientTests: XCTestCase {
     }
 
     func testDefaultCharacterLimitSplitsBeforeThreeThousandCharacters() async throws {
-        let words = makeWords(Array(repeating: String(repeating: "字", count: 1_001), count: 4))
+        let words = makeWords(Array(repeating: String(repeating: "字", count: 1_000) + "。", count: 4))
         let transport = SubtitleStubTransport { request, _ in
             try subtitleResponse(groups: [.init(unitIDs: subtitleUnitIDs(request), text: "校对结果")])
         }
@@ -163,6 +163,14 @@ final class SubtitleAIClientTests: XCTestCase {
     func testLongBatchesHaveReadOnlyContextAndBoundedScript() async throws {
         let words = makeWords((0..<11).map { "字幕\($0)" })
         let transport = SubtitleStubTransport { request, _ in
+            let input = try subtitleInput(request)
+            if input["task"] as? String == "reviewBoundary" {
+                let existing = try XCTUnwrap(input["existingGroups"] as? [[String: Any]])
+                return try subtitleResponse(groups: existing.map {
+                    .init(unitIDs: try XCTUnwrap($0["unitIDs"] as? [Int]),
+                        text: try XCTUnwrap($0["text"] as? String))
+                })
+            }
             return try subtitleResponse(groups: [.init(unitIDs: subtitleUnitIDs(request), text: "校对结果")])
         }
         let script = String(repeating: "很长的口播参考稿。", count: 3_000)
@@ -170,13 +178,18 @@ final class SubtitleAIClientTests: XCTestCase {
             words: words, script: script, theme: "", configuration: configuration)
         XCTAssertEqual(groups.flatMap(\.wordIDs), words.map(\.id))
         let requests = await transport.requests
-        XCTAssertEqual(requests.count, 3)
-        for (index, request) in requests.enumerated() {
+        XCTAssertEqual(requests.count, 5)
+        let batches = try requests.filter { try subtitleInput($0)["task"] as? String == "proofread" }
+        XCTAssertEqual(batches.count, 3)
+        for (index, request) in batches.enumerated() {
             let input = try subtitleInput(request)
             XCTAssertLessThanOrEqual((input["script"] as? String)?.count ?? 0, 6_000)
             XCTAssertLessThanOrEqual((input["units"] as? [[String: Any]])?.count ?? 0, 4)
             XCTAssertEqual(try subtitleUnitIDs(request), Array((index * 4 + 1)...min((index + 1) * 4, 11)))
             if index > 0 { XCTAssertFalse((input["contextBefore"] as? [String])?.isEmpty ?? true) }
+        }
+        for request in requests {
+            XCTAssertLessThanOrEqual((try subtitleInput(request)["script"] as? String)?.count ?? 0, 6_000)
         }
     }
 

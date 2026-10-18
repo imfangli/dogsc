@@ -94,6 +94,7 @@ final class VideoExporter: ObservableObject {
     @Published private(set) var isExporting = false
     @Published private(set) var exportProgress: Double = 0
     @Published private(set) var lastExportURL: URL?
+    @Published private(set) var lastSubtitleExportURL: URL?
     @Published private(set) var errorMessage: String?
     @Published private(set) var status = ExportStatus()
     private var statusTask: Task<Void, Never>?
@@ -107,6 +108,7 @@ final class VideoExporter: ObservableObject {
         isExporting = true
         exportProgress = 0
         lastExportURL = nil
+        lastSubtitleExportURL = nil
         errorMessage = nil
         let currentJobID = UUID()
         jobID = currentJobID
@@ -161,6 +163,7 @@ final class VideoExporter: ObservableObject {
                 progressRelay.invalidate()
                 exportProgress = 1
                 lastExportURL = request.outputURL
+                lastSubtitleExportURL = request.subtitleExport?.outputURL
                 AppPreferences.playExportCompletionSound()
             } catch {
                 errorMessage = Task.isCancelled ? nil : error.localizedDescription
@@ -203,6 +206,7 @@ final class VideoExporter: ObservableObject {
         guard !isExporting else { return }
         exportProgress = 0
         lastExportURL = nil
+        lastSubtitleExportURL = nil
         errorMessage = nil
         status = ExportStatus()
     }
@@ -384,8 +388,24 @@ final class VideoExporter: ObservableObject {
         let temporaryOutputURL = ExportFileTransaction.makeTemporaryURL(
             for: finalOutputURL
         )
+        let temporarySubtitleURL = request.subtitleExport.map {
+            ExportFileTransaction.makeTemporaryURL(for: $0.outputURL)
+        }
+        defer {
+            try? FileManager.default.removeItem(at: temporaryOutputURL)
+            if let temporarySubtitleURL {
+                try? FileManager.default.removeItem(at: temporarySubtitleURL)
+            }
+        }
         do {
             try Task.checkCancellation()
+            if let subtitleExport = request.subtitleExport, let temporarySubtitleURL {
+                do {
+                    try subtitleExport.contents.write(to: temporarySubtitleURL, atomically: true, encoding: .utf8)
+                } catch {
+                    throw VideoExporterError.exportFailed("写入 SRT 文件失败：\(error.localizedDescription)")
+                }
+            }
             switch request.outputKind {
             case .video:
                 let pipeline = try DirectExportPipeline(
@@ -417,18 +437,21 @@ final class VideoExporter: ObservableObject {
                 try await pipeline.run()
             }
         } catch {
-            try? FileManager.default.removeItem(at: temporaryOutputURL)
             throw error
         }
         stageHandler(.finishing)
         do {
             try Task.checkCancellation()
-            try ExportFileTransaction.promote(
-                temporaryURL: temporaryOutputURL,
-                to: finalOutputURL
-            )
+            var outputs = [ExportFileTransaction.Output(
+                temporaryURL: temporaryOutputURL, finalURL: finalOutputURL
+            )]
+            if let subtitleExport = request.subtitleExport, let temporarySubtitleURL {
+                outputs.append(ExportFileTransaction.Output(
+                    temporaryURL: temporarySubtitleURL, finalURL: subtitleExport.outputURL
+                ))
+            }
+            try ExportFileTransaction.promote(outputs)
         } catch {
-            try? FileManager.default.removeItem(at: temporaryOutputURL)
             throw VideoExporterError.exportFailed("写入最终文件失败：\(error.localizedDescription)")
         }
     }
