@@ -735,11 +735,6 @@
 "自动保存到本机" = "Saved on this Mac";
 "隐藏空行" = "Hide blank lines";
 "阅读时隐藏空行，编辑时显示原稿" = "Hide blank lines while reading; show the original while editing";
-"精简模式" = "Compact Mode";
-"退出精简模式" = "Exit Compact Mode";
-"提词器设置" = "Teleprompter Settings";
-"拖动提词窗口" = "Drag the teleprompter window";
-"收起设置，只显示提词内容" = "Collapse settings to make room for the script";
 "背景不透明度" = "Background opacity";
 "备忘录背景不透明度" = "Memo background opacity";
 "备忘录文稿" = "Memo text";

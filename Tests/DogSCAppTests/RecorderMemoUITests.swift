@@ -354,62 +354,7 @@ final class RecorderMemoUITests: XCTestCase {
         XCTAssertEqual(restored.text, source, "Persistence must retain all source blanks and CRLF characters.")
     }
 
-    func testHostedCompactModeKeepsTextViewSelectionAndHighlightWhileExpandingViewport() async throws {
-        let fixture = try makeHostedFixture()
-        defer { fixture.dispose() }
-        let source = String(repeating: "前面的口播稿段落。\r\n\r\n", count: 25) + "中间👩🏽‍💻的朗读位置。\n继续保持原稿。"
-        fixture.store.text = source
-        fixture.store.isEditing = false
-        shrink(fixture.panel, to: 420)
-        await settleLayout(fixture.panel)
-        try await settleAnimatedMemoLayout(fixture.panel)
-        let host = try XCTUnwrap(fixture.panel.contentViewController?.view)
-        let scroll = try XCTUnwrap(findMemoScrollView(in: host))
-        let view = try XCTUnwrap(scroll.documentView as? NSTextView)
-        let range = (source as NSString).range(of: "中间👩🏽‍💻的朗读位置。")
-        view.setSelectedRange(range)
-        view.layoutManager?.addTemporaryAttribute(.backgroundColor, value: NSColor.systemGreen,
-            forCharacterRange: range)
-        let fullViewportHeight = scroll.contentView.bounds.height
-        let fullFrame = fixture.panel.frame
-
-        fixture.store.setCompact(true)
-        await settleLayout(fixture.panel)
-        let compactScroll = try XCTUnwrap(findMemoScrollView(in: host))
-        let compactView = try XCTUnwrap(compactScroll.documentView as? NSTextView)
-        XCTAssertTrue(compactView === view, "Changing chrome must retain the native text editor and its selection/undo state.")
-        XCTAssertEqual(fixture.panel.frame, fullFrame, "Switching a sufficiently large window should preserve its frame.")
-        // The upstream glyph toolbar uses less chrome, while compact mode
-        // still releases the toolbar, speech controls and full-mode footer.
-        XCTAssertGreaterThan(compactScroll.contentView.bounds.height, fullViewportHeight + 100)
-        XCTAssertFalse(fixture.store.isEditing)
-        XCTAssertFalse(compactView.isEditable)
-        XCTAssertEqual(compactView.selectedRange(), range)
-        XCTAssertEqual(compactView.string, source)
-        var highlighted = NSRange(location: NSNotFound, length: 0)
-        XCTAssertNotNil(compactView.layoutManager?.temporaryAttribute(.backgroundColor,
-            atCharacterIndex: range.location, effectiveRange: &highlighted))
-        XCTAssertEqual(highlighted, range, "A display mode change must retain source UTF-16 highlight positions.")
-        let color = try XCTUnwrap(compactView.textColor?.usingColorSpace(.deviceRGB))
-        XCTAssertGreaterThanOrEqual(color.redComponent, 0.9)
-        XCTAssertGreaterThanOrEqual(color.greenComponent, 0.9)
-        XCTAssertGreaterThanOrEqual(color.blueComponent, 0.9)
-
-        fixture.store.setCompact(false)
-        await settleLayout(fixture.panel)
-        try await settleAnimatedMemoLayout(fixture.panel)
-        let restoredScroll = try XCTUnwrap(findMemoScrollView(in: host))
-        XCTAssertTrue(restoredScroll.documentView === view)
-        XCTAssertFalse(fixture.store.isEditing, "Leaving compact mode should keep reading mode.")
-        XCTAssertEqual(fixture.panel.frame, fullFrame, "Returning to full mode should restore the same window frame.")
-        XCTAssertEqual(restoredScroll.contentView.bounds.height, fullViewportHeight, accuracy: 1)
-        XCTAssertEqual(view.selectedRange(), range)
-        XCTAssertEqual(view.string, source)
-        XCTAssertNotNil(view.layoutManager?.temporaryAttribute(.backgroundColor,
-            atCharacterIndex: range.location, effectiveRange: nil))
-    }
-
-    func testHostedMemoAppearanceAdaptsWhileCompactTextStaysWhiteAndKeepsReadingState() async throws {
+    func testHostedMemoAppearanceKeepsReadingSelectionAndHighlight() async throws {
         let fixture = try makeHostedFixture()
         defer { fixture.dispose() }
         let source = "外观切换👩🏽‍💻时，原稿与跟读位置都应保留。"
@@ -424,120 +369,72 @@ final class RecorderMemoUITests: XCTestCase {
         view.layoutManager?.addTemporaryAttribute(.backgroundColor, value: NSColor.systemGreen,
             forCharacterRange: range)
 
-        let light = try resolvedTextColor(in: view)
-        XCTAssertLessThan(light.redComponent, 0.2)
-        fixture.panel.appearance = NSAppearance(named: .darkAqua)
-        await settleLayout(fixture.panel)
-        let dark = try resolvedTextColor(in: view)
-        XCTAssertGreaterThan(dark.redComponent, 0.9)
-
-        fixture.store.setCompact(true)
-        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+        for appearance in [NSAppearance.Name.aqua, .darkAqua, .aqua] {
             fixture.panel.appearance = NSAppearance(named: appearance)
             await settleLayout(fixture.panel)
             let color = try resolvedTextColor(in: view)
-            XCTAssertGreaterThanOrEqual(color.redComponent, 0.9)
-            XCTAssertGreaterThanOrEqual(color.greenComponent, 0.9)
-            XCTAssertGreaterThanOrEqual(color.blueComponent, 0.9)
+            if appearance == .aqua { XCTAssertLessThan(color.redComponent, 0.2) }
+            else { XCTAssertGreaterThan(color.redComponent, 0.9) }
+            XCTAssertTrue(findMemoScrollView(in: host)?.documentView === view)
+            XCTAssertFalse(view.isEditable)
+            XCTAssertEqual(view.string, source)
+            XCTAssertEqual(view.selectedRange(), range)
+            XCTAssertNotNil(view.layoutManager?.temporaryAttribute(.backgroundColor,
+                atCharacterIndex: range.location, effectiveRange: nil))
         }
-        fixture.store.setCompact(false)
-        fixture.panel.appearance = NSAppearance(named: .aqua)
-        await settleLayout(fixture.panel)
-        XCTAssertLessThan(try resolvedTextColor(in: view).redComponent, 0.2)
-        XCTAssertTrue(findMemoScrollView(in: host)?.documentView === view)
-        XCTAssertEqual(view.string, source)
-        XCTAssertEqual(view.selectedRange(), range)
-        XCTAssertNotNil(view.layoutManager?.temporaryAttribute(.backgroundColor,
-            atCharacterIndex: range.location, effectiveRange: nil))
     }
 
-    func testHostedCompactWindowCanShrinkTo140AndRestoresFullMinimumAtSameTopEdge() async throws {
+    func testHostedMemoClampsLegacySmallWindowWithoutChangingManuscript() async throws {
         let fixture = try makeHostedFixture()
         defer { fixture.dispose() }
         let source = String(repeating: "提词窗口变小仍应保留完整原稿。\n\n", count: 30)
         fixture.store.text = source
-        fixture.store.setCompact(true)
+        fixture.store.isEditing = false
         await settleLayout(fixture.panel)
         let host = try XCTUnwrap(fixture.panel.contentViewController?.view)
         let view = try XCTUnwrap(findMemoScrollView(in: host)?.documentView as? NSTextView)
         let top = fixture.panel.frame.maxY
-        // NSWindow's minSize getters are ignored under Auto Layout. Exercise
-        // a real resize attempt below both required native constraints instead.
-        fixture.panel.setFrame(NSRect(x: fixture.panel.frame.minX, y: top - 80, width: 180, height: 80), display: false)
+        fixture.panel.setFrame(NSRect(x: fixture.panel.frame.minX, y: top - 140, width: 240, height: 140), display: false)
         await settleLayout(fixture.panel)
-        XCTAssertEqual(fixture.panel.frame.size, NSSize(width: 240, height: 140))
-        XCTAssertEqual(fixture.panel.frame.maxY, top, accuracy: 1)
-        let compactScroll = try XCTUnwrap(findMemoScrollView(in: host))
-        XCTAssertGreaterThan(compactScroll.contentView.bounds.height, 90,
-            "The minimum compact panel should reserve almost all of its height for the manuscript.")
-        XCTAssertGreaterThan(view.frame.height, compactScroll.contentView.bounds.height)
-        XCTAssertEqual(view.string, source)
-
-        fixture.store.setCompact(false)
-        await settleLayout(fixture.panel)
-        XCTAssertGreaterThanOrEqual(fixture.panel.frame.width, 300)
-        XCTAssertGreaterThanOrEqual(fixture.panel.frame.height, 340)
-        XCTAssertEqual(fixture.panel.frame.maxY, top, accuracy: 1,
-            "Returning to full mode should grow downward instead of moving the top edge.")
-        fixture.panel.setFrame(NSRect(x: fixture.panel.frame.minX, y: top - 180, width: 200, height: 180), display: false)
-        await settleLayout(fixture.panel)
-        XCTAssertEqual(fixture.panel.frame.size, NSSize(width: 300, height: 340),
-            "A full-mode resize attempt below its minimum must be clamped by the actual window constraints.")
+        XCTAssertEqual(fixture.panel.frame.size, NSSize(width: 300, height: 340))
         XCTAssertEqual(fixture.panel.frame.maxY, top, accuracy: 1)
         XCTAssertTrue(findMemoScrollView(in: host)?.documentView === view)
+        XCTAssertGreaterThan(view.frame.height, try XCTUnwrap(findMemoScrollView(in: host)).contentView.bounds.height)
+        XCTAssertFalse(view.isEditable)
         XCTAssertEqual(fixture.store.text, source)
         XCTAssertEqual(view.string, source)
     }
 
-    func testHostedCompactOpacityZeroProducesTransparentTextBackdrop() async throws {
-        let fixture = try makeHostedFixture()
-        defer { fixture.dispose() }
-        let source = "透明提词"
-        fixture.store.text = source
-        fixture.store.setCompact(true)
-        fixture.store.compactOpacity = 0.2
-        shrink(fixture.panel, to: 180)
-        await settleLayout(fixture.panel)
-        let host = try XCTUnwrap(fixture.panel.contentViewController?.view)
-        let view = try XCTUnwrap(findMemoScrollView(in: host)?.documentView as? NSTextView)
-        let initialAlpha = try backgroundAlpha(in: host)
-        XCTAssertGreaterThan(initialAlpha, 0.05,
-            "The initial compact background must be visible so this snapshot check can detect transparency.")
-
-        fixture.store.compactOpacity = 0
-        await settleLayout(fixture.panel)
-        XCTAssertLessThanOrEqual(try backgroundAlpha(in: host), 0.01,
-            "Zero opacity should leave the manuscript background transparent.")
-        XCTAssertFalse(view.drawsBackground)
-        XCTAssertFalse(try XCTUnwrap(findMemoScrollView(in: host)).drawsBackground)
-        XCTAssertEqual(view.string, source)
-        XCTAssertTrue(findMemoScrollView(in: host)?.documentView === view)
-    }
-
-    func testCompactPreferencesPersistWithOriginalManuscriptAndBothOpacityEdges() throws {
-        let fixture = try makeHostedFixture()
-        defer { fixture.dispose() }
-        XCTAssertFalse(fixture.store.isCompact)
-        XCTAssertEqual(fixture.store.compactOpacity, 0.2, accuracy: 0.001)
-        let source = "原稿👩🏽‍💻\r\n\r\n \t\u{3000}\n完整保留。"
-        fixture.store.text = source
-        fixture.store.setCompact(true)
-        fixture.store.compactOpacity = 0
-        fixture.store.save()
-        let restored = RecorderMemoStore(defaults: fixture.defaults)
-        XCTAssertTrue(restored.isCompact)
-        XCTAssertEqual(restored.compactOpacity, 0, accuracy: 0.001)
-        XCTAssertFalse(restored.isEditing)
-        XCTAssertEqual(restored.text, source)
-
-        fixture.store.setCompact(false)
-        fixture.store.compactOpacity = 1
-        fixture.store.save()
-        let restoredFull = RecorderMemoStore(defaults: fixture.defaults)
-        XCTAssertFalse(restoredFull.isCompact)
-        XCTAssertFalse(fixture.store.isEditing)
-        XCTAssertEqual(restoredFull.compactOpacity, 1, accuracy: 0.001)
-        XCTAssertEqual(restoredFull.text, source)
+    func testRetiredCompactPreferencesPreserveNormalSettingsAndManuscript() throws {
+        let domain = "DogSC.RetiredMemoPreferences.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: domain))
+        defer { defaults.removePersistentDomain(forName: domain) }
+        for source in ["原稿👩🏽‍💻\r\n\r\n \t\u{3000}\n完整保留。", ""] {
+            defaults.set(source, forKey: "recorder.memo.text")
+            defaults.set(32.0, forKey: "recorder.memo.font-size")
+            defaults.set(0.61, forKey: "recorder.memo.background-opacity")
+            defaults.set(true, forKey: "recorder.memo.hides-blank-lines")
+            defaults.set(true, forKey: "recorder.memo.compact")
+            defaults.set(0.0, forKey: "recorder.memo.compact-background-opacity")
+            let store = RecorderMemoStore(defaults: defaults)
+            XCTAssertEqual(store.text, source)
+            XCTAssertEqual(store.fontSize, 32)
+            XCTAssertEqual(store.opacity, 0.61, accuracy: 0.001)
+            XCTAssertTrue(store.hidesBlankLines)
+            XCTAssertEqual(store.isEditing, source.isEmpty,
+                "An empty memo must remain editable regardless of the retired presentation setting.")
+            XCTAssertNil(defaults.object(forKey: "recorder.memo.compact"))
+            XCTAssertNil(defaults.object(forKey: "recorder.memo.compact-background-opacity"))
+            store.fontSize = 36
+            store.save()
+            let restored = RecorderMemoStore(defaults: defaults)
+            XCTAssertEqual(restored.fontSize, 36)
+            XCTAssertEqual(restored.text, source)
+            XCTAssertEqual(restored.opacity, 0.61, accuracy: 0.001)
+            XCTAssertTrue(restored.hidesBlankLines)
+            XCTAssertNil(defaults.object(forKey: "recorder.memo.compact"))
+            XCTAssertNil(defaults.object(forKey: "recorder.memo.compact-background-opacity"))
+        }
     }
 
     private func resolvedTextColor(in view: NSTextView) throws -> NSColor {
@@ -546,12 +443,6 @@ final class RecorderMemoUITests: XCTestCase {
             color = view.textColor?.usingColorSpace(.deviceRGB)
         }
         return try XCTUnwrap(color)
-    }
-
-    private func backgroundAlpha(in view: NSView) throws -> CGFloat {
-        let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
-        view.cacheDisplay(in: view.bounds, to: bitmap)
-        return try XCTUnwrap(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)).alphaComponent
     }
 
     private func applyMemoParagraphStyle(to view: NSTextView) {

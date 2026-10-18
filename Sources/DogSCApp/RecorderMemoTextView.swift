@@ -8,7 +8,6 @@ struct RecorderMemoTextView: NSViewRepresentable {
     @Binding var text: String
     let fontSize: Double
     let isEditing: Bool
-    var isCompact = false
     var hidesBlankLines = false
     let highlightedRange: NSRange?
     let scrollTargetRange: NSRange?
@@ -45,8 +44,7 @@ struct RecorderMemoTextView: NSViewRepresentable {
         view.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         view.minSize = .zero
         view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        view.isCompact = isCompact
-        view.textColor = isCompact ? .white : RecorderStyle.inkNSColor
+        view.textColor = RecorderStyle.inkNSColor
         view.insertionPointColor = view.textColor ?? RecorderStyle.inkNSColor
         view.focusRingType = .none
         view.setAccessibilityLabel(appLocalized("备忘录文稿"))
@@ -66,17 +64,9 @@ struct RecorderMemoTextView: NSViewRepresentable {
         defer { context.coordinator.isApplyingViewUpdate = false }
         view.isEditable = isEditing
         view.isSelectable = true
-        (view as? MemoTextView)?.isCompact = isCompact
-        let textColor = isCompact ? NSColor.white : RecorderStyle.inkNSColor
+        let textColor = RecorderStyle.inkNSColor
         if view.textColor != textColor { view.textColor = textColor }
         view.insertionPointColor = textColor
-        (scroll as? MemoScrollView)?.usesTransparentScroller = isCompact
-        scroll.scrollerKnobStyle = isCompact ? .light : .default
-        let inset = NSSize(width: isCompact ? 8 : 14, height: isCompact ? 8 : 14)
-        if view.textContainerInset != inset {
-            view.textContainerInset = inset
-            scroll.needsLayout = true
-        }
         if view.string != text, !view.hasMarkedText() { view.string = text }
         if view.font?.pointSize != CGFloat(fontSize), !view.hasMarkedText() {
             let paragraph = NSMutableParagraphStyle()
@@ -211,19 +201,15 @@ struct RecorderMemoTextView: NSViewRepresentable {
     }
 
     final class MemoTextView: NSTextView {
-        var isCompact = false {
-            didSet { if oldValue != isCompact { refreshTextColors() } }
-        }
-
         override func viewDidChangeEffectiveAppearance() {
             super.viewDidChangeEffectiveAppearance()
             // Refresh glyph attributes and caret without replacing the text,
-            // selection or IME marked range. Transparent prompts stay white.
+            // selection or IME marked range.
             refreshTextColors()
         }
 
         private func refreshTextColors() {
-            let color = isCompact ? NSColor.white : RecorderStyle.inkNSColor
+            let color = RecorderStyle.inkNSColor
             textColor = color
             insertionPointColor = color
             needsDisplay = true
@@ -232,14 +218,6 @@ struct RecorderMemoTextView: NSViewRepresentable {
 
     final class MemoScrollView: NSScrollView {
         var onUserScroll: (() -> Void)?
-        var usesTransparentScroller = false {
-            didSet {
-                guard usesTransparentScroller != oldValue else { return }
-                (verticalScroller as? MemoScroller)?.hidesTrack = usesTransparentScroller
-                scrollerStyle = usesTransparentScroller ? .overlay : NSScroller.preferredScrollerStyle
-                needsLayout = true
-            }
-        }
         private var isSizingDocument = false
         private var isTouchScrolling = false
         private var isMomentumScrolling = false
@@ -252,14 +230,6 @@ struct RecorderMemoTextView: NSViewRepresentable {
 
         override var intrinsicContentSize: NSSize {
             NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
-        }
-
-        // AppKit reapplies the system preference when input devices or the
-        // "Show scroll bars" setting changes. The transparent reader keeps
-        // overlay scrollers even when that preference is "Always".
-        override var scrollerStyle: NSScroller.Style {
-            get { super.scrollerStyle }
-            set { super.scrollerStyle = usesTransparentScroller ? .overlay : newValue }
         }
 
         override init(frame frameRect: NSRect) {
@@ -323,17 +293,8 @@ struct RecorderMemoTextView: NSViewRepresentable {
     final class MemoScroller: NSScroller {
         var onTracking: ((Bool) -> Void)?
         var onTrackClick: (() -> Void)?
-        var hidesTrack = false {
-            didSet { if hidesTrack != oldValue { needsDisplay = true } }
-        }
-
-        // Custom scrollers otherwise force AppKit to use an opaque legacy
-        // track. Keep native overlay drawing and parts-based knob tracking.
+        // Preserve native overlay drawing while observing manual scrolling.
         override class var isCompatibleWithOverlayScrollers: Bool { true }
-
-        override func drawKnobSlot(in slotRect: NSRect, highlight flag: Bool) {
-            if !hidesTrack { super.drawKnobSlot(in: slotRect, highlight: flag) }
-        }
 
         override func testPart(_ point: NSPoint) -> NSScroller.Part {
             let part = super.testPart(point)
