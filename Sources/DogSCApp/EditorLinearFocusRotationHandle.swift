@@ -7,7 +7,7 @@ struct EditorLinearFocusRotationHandle: View {
     let isActive: Bool
 
     var body: some View {
-        Image(systemName: "arrow.triangle.2.circlepath")
+        EditorSymbol("arrow.triangle.2.circlepath", size: 17)
             .font(.system(size: 13, weight: .semibold))
             .rotationEffect(.degrees(rotation))
             .foregroundStyle(.white)

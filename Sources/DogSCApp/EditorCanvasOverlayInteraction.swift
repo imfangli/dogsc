@@ -63,14 +63,14 @@ extension CanvasPreview {
                             let isResizing = overlayResizeSelection == selection
                             for corner in OverlayResizeCorner.allCases {
                                 let point = mosaicCornerPoint(corner, in: quad)
-                                let radius: CGFloat = isResizing ? 6.5 : 6
+                                let radius: CGFloat = isResizing ? 8.4 : 7
                                 let dot = Path(ellipseIn: CGRect(
                                     x: point.x - radius, y: point.y - radius,
                                     width: radius * 2, height: radius * 2
                                 ))
-                                context.fill(dot, with: .color(Color(white: 0.055)))
+                                context.fill(dot, with: .color(EditorConsole.Track.overlay.fill))
                                 context.stroke(dot,
-                                               with: .color(EditorTheme.mediaAccent.opacity(isResizing ? 1 : 0.90)),
+                                               with: .color(Color.white),
                                                lineWidth: isResizing ? 2.5 : 2)
                             }
                         }
@@ -182,26 +182,8 @@ extension CanvasPreview {
                             size: CGSize(width: width, height: height),
                             rotation: sticker.rotationRadians
                         )
-                        Circle()
-                            .fill(Color(white: 0.055))
-                            .overlay {
-                                Circle().stroke(
-                                    EditorTheme.mediaAccent.opacity(isResizing ? 1 : 0.90),
-                                    lineWidth: isResizing ? 2.5 : 2
-                                )
-                            }
-                            .shadow(
-                                color: isResizing
-                                    ? EditorTheme.mediaAccent.opacity(0.32)
-                                    : .black.opacity(0.7),
-                                radius: isResizing ? 5 : 2
-                            )
-                            .frame(width: 12, height: 12)
-                            .frame(width: 30, height: 30)
-                            .contentShape(Rectangle())
+                        EditorCanvasHandle(color: EditorConsole.Track.overlay.fill, active: isResizing)
                             .position(point)
-                            .scaleEffect(isResizing ? 1.08 : 1)
-                            .animation(SpringMotion.interactive, value: isResizing)
                             .highPriorityGesture(stickerResizeGesture(
                                 id: sticker.id,
                                 center: center,
@@ -222,38 +204,22 @@ extension CanvasPreview {
                         path.addLine(to: rotationGeometry.handle)
                     }
                     .stroke(
-                        EditorTheme.mediaAccent.opacity(isRotating ? 0.92 : 0.62),
+                        EditorConsole.Track.overlay.fill.opacity(isRotating ? 1 : 0.8),
                         style: StrokeStyle(lineWidth: isRotating ? 1.75 : 1.25)
                     )
                     .frame(width: canvasSize.width, height: canvasSize.height)
                     .allowsHitTesting(false)
                     .zIndex(interactionZIndex + 1)
 
-                    Circle()
-                        .fill(Color(white: 0.055))
+                    EditorCanvasHandle(color: EditorConsole.Track.overlay.fill, active: isRotating, size: 20)
                         .overlay {
-                            Circle().stroke(
-                                EditorTheme.mediaAccent.opacity(isRotating ? 1 : 0.90),
-                                lineWidth: isRotating ? 2.5 : 2
-                            )
+                            AppLineIcon(kind: .refresh, size: 11)
+                                .foregroundStyle(EditorConsole.Track.overlay.ink)
+                                .allowsHitTesting(false)
                         }
-                        .overlay {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                                .font(.appUI(size: 8.5, weight: .bold))
-                                .foregroundStyle(EditorTheme.mediaAccent)
-                        }
-                        .shadow(
-                            color: isRotating
-                                ? EditorTheme.mediaAccent.opacity(0.34)
-                                : .black.opacity(0.7),
-                            radius: isRotating ? 6 : 2
-                        )
-                        .frame(width: 18, height: 18)
                         .frame(width: 34, height: 34)
                         .contentShape(Rectangle())
                         .position(rotationGeometry.handle)
-                        .scaleEffect(isRotating ? 1.10 : 1)
-                        .animation(SpringMotion.interactive, value: isRotating)
                         .highPriorityGesture(stickerRotationGesture(
                             id: sticker.id,
                             center: center,
@@ -311,6 +277,7 @@ extension CanvasPreview {
     ) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .global)
             .onChanged { value in
+                EditorDragFrameCoalescer.shared.submit {
                 if overlayDragSelection != selection {
                     onCanvasFocused()
                     overlayDragSelection = selection
@@ -352,7 +319,9 @@ extension CanvasPreview {
                     }
                 }
             }
+}
             .onEnded { _ in
+                EditorDragFrameCoalescer.shared.flush()
                 defer {
                     overlayDragOrigin = nil
                     overlayDragSelection = nil
@@ -389,6 +358,7 @@ extension CanvasPreview {
         let selection = EditorSelection.mosaic(clip.id)
         return DragGesture(minimumDistance: 1, coordinateSpace: .local)
             .onChanged { value in
+                EditorDragFrameCoalescer.shared.submit {
                 if mosaicDragOrigin == nil && mosaicResizeOrigin == nil {
                     guard let origin = editorStore.project.timeline.mosaicClips
                         .first(where: { $0.id == clip.id })?.sourceRect else { return }
@@ -452,7 +422,9 @@ extension CanvasPreview {
                     updateMosaicDragPreview(clipID: clip.id, snapped: snapped)
                 }
             }
+}
             .onEnded { _ in
+                EditorDragFrameCoalescer.shared.flush()
                 let didResize = mosaicResizeOrigin != nil
                 let didMove = mosaicDragOrigin != nil
                 defer {
@@ -515,6 +487,7 @@ extension CanvasPreview {
         let selection = EditorSelection.sticker(id)
         return DragGesture(minimumDistance: 0, coordinateSpace: .global)
             .onChanged { value in
+                EditorDragFrameCoalescer.shared.submit {
                 if stickerResizeOrigin == nil {
                     onCanvasFocused()
                     guard let width = editorStore.project.timeline.stickerClips
@@ -554,7 +527,9 @@ extension CanvasPreview {
                     project.timeline.stickerClips[index].width = width
                 }
             }
+}
             .onEnded { _ in
+                EditorDragFrameCoalescer.shared.flush()
                 defer {
                     stickerResizeOrigin = nil
                     overlayResizeSelection = nil
@@ -576,6 +551,7 @@ extension CanvasPreview {
         let selection = EditorSelection.sticker(id)
         return DragGesture(minimumDistance: 0, coordinateSpace: .global)
             .onChanged { value in
+                EditorDragFrameCoalescer.shared.submit {
                 if stickerRotationOrigin == nil {
                     onCanvasFocused()
                     guard let degrees = editorStore.project.timeline.stickerClips
@@ -616,7 +592,9 @@ extension CanvasPreview {
                     project.timeline.stickerClips[index].rotationDegrees = degrees
                 }
             }
+}
             .onEnded { _ in
+                EditorDragFrameCoalescer.shared.flush()
                 defer { stickerRotationOrigin = nil }
                 do {
                     _ = try editorStore.commitInteraction(actionName: "旋转贴图")

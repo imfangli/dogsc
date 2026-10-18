@@ -130,7 +130,7 @@ final class RecorderMemoController: NSObject, ObservableObject, NSWindowDelegate
         panel.isMovableByWindowBackground = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         panel.appearance = nil
-        panel.title = appLocalized("备忘录")
+        appLocalizeWindowTitle(panel, "备忘录")
         panel.identifier = NSUserInterfaceItemIdentifier("recorder.memo.window")
         // CaptureSurfaceFilter excludes this process's helper windows, including
         // memos opened mid-recording. Other recorders may capture the memo.

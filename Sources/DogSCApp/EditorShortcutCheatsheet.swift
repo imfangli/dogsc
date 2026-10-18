@@ -68,12 +68,12 @@ struct EditorShortcutCheatsheet: View {
         VStack(spacing: 0) {
             HStack {
                 Text("快捷键速查")
-                    .font(.appUI(.title3, weight: .semibold))
+                    .font(.appUI(size: 15, weight: .semibold))
                 Spacer()
                 Button {
                     dismiss()
                 } label: {
-                    Image(systemName: "xmark")
+                    EditorSymbol("xmark", size: 14.5)
                         .font(.appUI(size: 11, weight: .bold))
                 }
                 .buttonStyle(.editorDismissIcon)
@@ -82,9 +82,8 @@ struct EditorShortcutCheatsheet: View {
                 .accessibilityLabel("关闭快捷键速查")
             }
             .padding(.horizontal, 20)
-            .padding(.vertical, 16)
-
-            Divider().overlay(dividerColor)
+            .padding(.top, 16)
+            .padding(.bottom, 4)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -97,30 +96,17 @@ struct EditorShortcutCheatsheet: View {
                                         .fixedSize(horizontal: true, vertical: false)
                                         .padding(.horizontal, 8)
                                         .padding(.vertical, 4)
-                                        .background(
-                                            LinearGradient(
-                                                colors: [EditorTheme.chrome(0.12), EditorTheme.chrome(0.06)],
-                                                startPoint: .top,
-                                                endPoint: .bottom
-                                            ),
-                                            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                        )
-                                        .overlay {
+                                        // A flat keycap cut out of the tile, with a
+                                        // slightly deeper lower edge for the key.
+                                        .background(EditorTheme.panelSurface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                        .overlay(alignment: .bottom) {
                                             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                                .stroke(
-                                                    LinearGradient(
-                                                        colors: [EditorTheme.chrome(0.24), EditorTheme.chrome(0.08)],
-                                                        startPoint: .top,
-                                                        endPoint: .bottom
-                                                    ),
-                                                    lineWidth: 0.75
-                                                )
+                                                .strokeBorder(EditorTheme.chrome(0.12), lineWidth: 0.75)
                                         }
-                                        .shadow(color: Color.black.opacity(0.3), radius: 2, y: 1)
                                         .frame(width: keyColumnWidth, alignment: .leading)
                                     Text(appLocalized(entry.action))
-                                        .font(.appUI(.caption))
-                                        .foregroundStyle(Color.primary.opacity(0.85))
+                                        .font(.appUI(size: 12))
+                                        .foregroundStyle(EditorTheme.primaryText)
                                     Spacer(minLength: 0)
                                 }
                             }

@@ -232,12 +232,16 @@ struct CanvasPreview: View {
                 // beyond the monitor even when its pixels are clipped below.
                 .contentShape(Rectangle())
                 .overlay {
-                    EditorTheme.sleepingMonitor
+                    // While the window is in the background the live picture
+                    // is retired to save power. The cover is a calm resting
+                    // plate with one quiet note, not a grey veil.
+                    EditorCanvasRestingCover(image: playbackController.pausedScreenImage)
                         .opacity(sleepPresentation.opacity)
                         .allowsHitTesting(false).accessibilityHidden(true)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(.white.opacity(0.12), lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(EditorTheme.chrome(0.08), lineWidth: 0.5))
                 .overlay {
                     // Editing chrome belongs to the workspace, not the
                     // rendered monitor's pixel crop (especially in portrait).
@@ -366,7 +370,7 @@ struct CanvasPreview: View {
         ZStack {
             // This opaque, static plate survives Metal/decoder retirement.
             // Sleep never exposes the workspace grid through the monitor.
-            EditorTheme.sleepingMonitor
+            EditorCanvasRestingCover(showsNote: false)
                 .contentShape(Rectangle())
                 .onTapGesture(perform: focusCanvas)
 
@@ -377,6 +381,7 @@ struct CanvasPreview: View {
 
             if showsEditingControls && isCropping {
                 cropEditor(canvasSize: liveCanvasSize, sourceAspect: sourceAspectRatio)
+                    .modifier(EditorCropReveal())
                     .transition(.identity)
             } else if showsEditingControls, let renderedFrame {
                 if !isSplitterResizing && isEditorActive {
@@ -541,6 +546,7 @@ struct CanvasPreview: View {
             }
         }
         .shadow(color: chrome.glowColor, radius: chrome.glowRadius)
+                .animation(.easeOut(duration: 0.18), value: chrome.phase)
         .frame(width: canvasSize.width, height: canvasSize.height)
         .onTapGesture {
             onCanvasFocused()
@@ -577,16 +583,32 @@ struct CanvasPreview: View {
         return ZStack(alignment: .topLeading) {
             cropDimming(sourceOrigin: sourceOrigin, sourceSize: sourceSize, selection: selectionRect)
 
-            RoundedRectangle(cornerRadius: 3, style: .continuous)
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
                 .fill(Color.clear)
                 .contentShape(Rectangle())
                 .overlay(
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .stroke(.white.opacity(0.96), lineWidth: 1.5)
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .stroke(.white.opacity(0.92), lineWidth: 1)
                 )
+                // Thirds, as in any photo crop: quiet at rest, clearer while
+                // the frame is being moved or resized.
+                .overlay {
+                    Path { path in
+                        for fraction in [1.0 / 3.0, 2.0 / 3.0] {
+                            path.move(to: CGPoint(x: selectionRect.width * fraction, y: 0))
+                            path.addLine(to: CGPoint(x: selectionRect.width * fraction, y: selectionRect.height))
+                            path.move(to: CGPoint(x: 0, y: selectionRect.height * fraction))
+                            path.addLine(to: CGPoint(x: selectionRect.width, y: selectionRect.height * fraction))
+                        }
+                    }
+                    .stroke(.white.opacity(cropDragOrigin == nil ? 0.28 : 0.6), lineWidth: 0.5)
+                    .animation(SpringMotion.hover, value: cropDragOrigin == nil)
+                    .allowsHitTesting(false)
+                }
                 .frame(width: selectionRect.width, height: selectionRect.height)
                 .position(x: selectionRect.midX, y: selectionRect.midY)
                 .gesture(cropMoveGesture(sourceSize: sourceSize))
+                .editorCursor(.openHand)
                 // Canvas dragging remains the direct-manipulation path. The
                 // four named pixel steppers in the inspector are the precise
                 // keyboard/VoiceOver path, so this mouse-only layer must not
@@ -597,14 +619,25 @@ struct CanvasPreview: View {
                 cropHandle(handle, in: selectionRect, sourceSize: sourceSize)
             }
 
-            Text("拖动边缘或四角裁切 · Esc 取消")
-                .font(.appUI(.caption, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
-                .padding(.horizontal, 11)
-                .frame(height: 28)
-                .background(.black.opacity(0.76), in: Capsule())
-                .position(x: canvasSize.width / 2, y: canvasSize.height - 24)
-                .allowsHitTesting(false)
+            HStack(spacing: 8) {
+                AppLineIcon(kind: .crop, size: 13)
+                Text(appLocalized("拖动边缘或四角裁切"))
+                    .font(.appUI(size: 12, weight: .medium))
+                Text("Esc")
+                    .font(.appUI(size: 11, weight: .semibold))
+                    .padding(.horizontal, 6)
+                    .frame(height: 18)
+                    .background(.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                Text(appLocalized("取消"))
+                    .font(.appUI(size: 12, weight: .medium))
+                    .opacity(0.7)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 13)
+            .frame(height: 32)
+            .background(.black.opacity(0.62), in: Capsule(style: .continuous))
+            .position(x: canvasSize.width / 2, y: canvasSize.height - 26)
+            .allowsHitTesting(false)
         }
         .frame(width: canvasSize.width, height: canvasSize.height)
     }
@@ -718,18 +751,22 @@ struct CanvasPreview: View {
         sourceSize: CGSize
     ) -> some View {
         let position = cropHandlePosition(handle, in: rect)
-        return ZStack {
-            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                .fill(.white)
-                .overlay(RoundedRectangle(cornerRadius: 3).stroke(EditorTheme.mediaAccent, lineWidth: 1.5))
-                .frame(width: 14, height: 14)
-                .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
-        }
+        return CropHandleGlyph(handle: handle)
+            .shadow(color: .black.opacity(0.45), radius: 2.5, y: 1)
             .frame(width: 30, height: 30)
             .contentShape(Rectangle())
+            .editorCursor(cropCursor(for: handle))
             .position(position)
             .highPriorityGesture(cropResizeGesture(handle: handle, sourceSize: sourceSize))
             .accessibilityHidden(true)
+    }
+
+    func cropCursor(for handle: CropHandle) -> NSCursor {
+        switch handle {
+        case .top, .bottom: .resizeUpDown
+        case .left, .right: .resizeLeftRight
+        case .topLeft, .topRight, .bottomRight, .bottomLeft: .crosshair
+        }
     }
 
     func cropHandlePosition(_ handle: CropHandle, in rect: CGRect) -> CGPoint {
@@ -748,6 +785,7 @@ struct CanvasPreview: View {
     func cropMoveGesture(sourceSize: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 1)
             .onChanged { value in
+                EditorDragFrameCoalescer.shared.submit {
                 if cropDragOrigin == nil { cropDragOrigin = cropDraft.clamped() }
                 guard let origin = cropDragOrigin else { return }
                 let x = min(
@@ -760,19 +798,24 @@ struct CanvasPreview: View {
                 )
                 cropDraft = NormalizedCrop(x: x, y: y, width: origin.width, height: origin.height)
             }
-            .onEnded { _ in cropDragOrigin = nil }
+}
+            .onEnded { _ in
+                EditorDragFrameCoalescer.shared.flush(); cropDragOrigin = nil }
     }
 
     func cropResizeGesture(handle: CropHandle, sourceSize: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                EditorDragFrameCoalescer.shared.submit {
                 if cropDragOrigin == nil { cropDragOrigin = cropDraft.clamped() }
                 guard let origin = cropDragOrigin else { return }
                 let dx = Double(value.translation.width / max(sourceSize.width, 1))
                 let dy = Double(value.translation.height / max(sourceSize.height, 1))
                 cropDraft = resizedCrop(origin, handle: handle, dx: dx, dy: dy)
             }
-            .onEnded { _ in cropDragOrigin = nil }
+}
+            .onEnded { _ in
+                EditorDragFrameCoalescer.shared.flush(); cropDragOrigin = nil }
     }
 
     func resizedCrop(
@@ -860,9 +903,11 @@ struct CanvasPreview: View {
                     shape.stroke(chrome.strokeColor, lineWidth: chrome.lineWidth)
                 }
                 .shadow(color: chrome.glowColor, radius: chrome.glowRadius)
+                .animation(.easeOut(duration: 0.18), value: chrome.phase)
                 .gesture(
                     DragGesture(minimumDistance: 1, coordinateSpace: .global)
                         .onChanged { value in
+                EditorDragFrameCoalescer.shared.submit {
                             if screenDragOrigin == nil {
                                 guard editorStore.beginCanvasInteraction(
                                     scope: scope,
@@ -920,7 +965,9 @@ struct CanvasPreview: View {
                                 scope: interactionScope
                             )
                         }
+}
                         .onEnded { _ in
+                EditorDragFrameCoalescer.shared.flush()
                             if screenDragOrigin != nil {
                                 commitCanvasInteraction(
                                     actionName: scope == .screen(.base)
@@ -957,27 +1004,15 @@ struct CanvasPreview: View {
                     }
                 }
 
-            ZStack {
-                Circle()
-                    .fill(EditorTheme.mediaAccent)
-                    .overlay(Circle().stroke(.white, lineWidth: 1.5))
-                    .frame(width: 16, height: 16)
-                    .shadow(
-                        color: isResizing
-                            ? EditorTheme.mediaAccent.opacity(0.34)
-                            : .black.opacity(0.45),
-                        radius: isResizing ? 6 : 3,
-                        y: isResizing ? 0 : 1
-                    )
-            }
-                .frame(width: 30, height: 30)
-                .contentShape(Rectangle())
+            EditorCanvasHandle(
+                color: EditorConsole.palette(for: scope.selection ?? .screen).fill,
+                active: isResizing
+            )
                 .position(x: CGFloat(handle.x), y: CGFloat(handle.y))
-                .scaleEffect(isResizing ? 1.08 : 1)
-                .animation(SpringMotion.interactive, value: isResizing)
                 .highPriorityGesture(
                     DragGesture(minimumDistance: 0, coordinateSpace: .global)
                         .onChanged { value in
+                EditorDragFrameCoalescer.shared.submit {
                             if screenScaleOrigin == nil {
                                 guard editorStore.beginCanvasInteraction(
                                     scope: scope,
@@ -1018,7 +1053,9 @@ struct CanvasPreview: View {
                                 scope: interactionScope
                             )
                         }
+}
                         .onEnded { _ in
+                EditorDragFrameCoalescer.shared.flush()
                             if screenScaleOrigin != nil {
                                 commitCanvasInteraction(
                                     actionName: scope == .screen(.base)
@@ -1111,6 +1148,7 @@ struct CanvasPreview: View {
                 // 一起动，translation 被自身移动污染形成正反馈振荡（拖得越远越抖）。
                 DragGesture(minimumDistance: 0, coordinateSpace: .global)
                     .onChanged { value in
+                EditorDragFrameCoalescer.shared.submit {
                         guard cameraSizeOrigin == nil else { return }
                         if cameraDragOrigin == nil {
                             guard editorStore.beginCanvasInteraction(
@@ -1163,7 +1201,9 @@ struct CanvasPreview: View {
                             scope: interactionScope
                         )
                     }
+}
                     .onEnded { _ in
+                EditorDragFrameCoalescer.shared.flush()
                         if cameraDragOrigin != nil {
                             commitCanvasInteraction(
                                 actionName: scope == .camera(.base)
@@ -1203,28 +1243,16 @@ struct CanvasPreview: View {
             }
 
             if isSelected {
-                ZStack {
-                    Circle()
-                        .fill(EditorTheme.mediaAccent)
-                        .overlay(Circle().stroke(.white, lineWidth: 1.5))
-                        .frame(width: 16, height: 16)
-                        .shadow(
-                            color: isResizing
-                                ? EditorTheme.mediaAccent.opacity(0.34)
-                                : .black.opacity(0.45),
-                            radius: isResizing ? 6 : 3,
-                            y: isResizing ? 0 : 1
-                        )
-                }
-                    .frame(width: 30, height: 30)
-                    .contentShape(Rectangle())
+                EditorCanvasHandle(
+                    color: EditorConsole.palette(for: scope.selection ?? .screen).fill,
+                    active: isResizing
+                )
                     .offset(x: 15, y: 15)
-                    .scaleEffect(isResizing ? 1.08 : 1)
-                    .animation(SpringMotion.interactive, value: isResizing)
                     .gesture(
                         // 同摄像头拖动：把手随视图移动，必须全局坐标系避免振荡。
                         DragGesture(minimumDistance: 0, coordinateSpace: .global)
                             .onChanged { value in
+                EditorDragFrameCoalescer.shared.submit {
                                 cameraDragOrigin = nil
                                 cameraDragScope = nil
                                 if cameraSizeOrigin == nil {
@@ -1253,7 +1281,9 @@ struct CanvasPreview: View {
                                     scope: interactionScope
                                 )
                             }
+}
                             .onEnded { _ in
+                EditorDragFrameCoalescer.shared.flush()
                                 if cameraSizeOrigin != nil {
                                     commitCanvasInteraction(
                                         actionName: scope == .camera(.base)
@@ -1368,4 +1398,110 @@ struct CanvasPreview: View {
         )
     }
 
+}
+
+
+/// The plate shown where the live canvas is paused or not yet drawn. When a
+/// paused frame exists it stays as a soft, frosted memory of the picture so
+/// the monitor never turns into an empty slab; a small note says why.
+struct EditorCanvasRestingCover: View {
+    var image: NSImage? = nil
+    var showsNote = true
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [EditorTheme.panelRaised, EditorTheme.stage],
+                           startPoint: .top, endPoint: .bottom)
+            if let image, let frosted = Self.frosted(image) {
+                // A 40 px copy enlarged with smooth interpolation reads as
+                // frosted glass without running a blur filter every frame.
+                Color.clear
+                    .overlay { Image(nsImage: frosted).resizable().interpolation(.high).scaledToFill() }
+                    .overlay { EditorTheme.stage.opacity(0.5) }
+                    .clipped()
+            }
+            if showsNote {
+                HStack(spacing: 6) {
+                    AppLineIcon(kind: .pause, size: 11)
+                    Text("预览已暂停")
+                        .font(.appUI(size: 12, weight: .medium))
+                }
+                .foregroundStyle(EditorTheme.secondaryText)
+                .padding(.horizontal, 14)
+                .frame(height: 30)
+                .background(.regularMaterial, in: Capsule(style: .continuous))
+                .overlay { Capsule(style: .continuous).strokeBorder(EditorTheme.islandOutline, lineWidth: 0.5) }
+                .shadow(color: EditorTheme.softShadow, radius: 10, y: 4)
+            }
+        }
+    }
+
+    @MainActor private static var frostedCache: (source: ObjectIdentifier, image: NSImage)?
+
+    @MainActor private static func frosted(_ image: NSImage) -> NSImage? {
+        let key = ObjectIdentifier(image)
+        if let cached = frostedCache, cached.source == key { return cached.image }
+        guard image.size.width > 0, image.size.height > 0 else { return nil }
+        let width = 40
+        let height = max(Int((40 * image.size.height / image.size.width).rounded()), 1)
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
+                                         bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                         colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        context.imageInterpolation = .high
+        image.draw(in: NSRect(x: 0, y: 0, width: width, height: height))
+        NSGraphicsContext.restoreGraphicsState()
+        let small = NSImage(size: NSSize(width: width, height: height))
+        small.addRepresentation(rep)
+        frostedCache = (key, small)
+        return small
+    }
+}
+
+
+/// Corner handles are bold L-brackets and edge handles short bars, the way
+/// a photo crop reads; each sits exactly on the frame line.
+private struct CropHandleGlyph: View {
+    let handle: CropHandle
+
+    var body: some View {
+        Canvas { context, size in
+            let c = CGPoint(x: size.width / 2, y: size.height / 2)
+            let arm: CGFloat = 13
+            var path = Path()
+            switch handle {
+            case .topLeft:
+                path.move(to: CGPoint(x: c.x, y: c.y + arm)); path.addLine(to: c); path.addLine(to: CGPoint(x: c.x + arm, y: c.y))
+            case .topRight:
+                path.move(to: CGPoint(x: c.x - arm, y: c.y)); path.addLine(to: c); path.addLine(to: CGPoint(x: c.x, y: c.y + arm))
+            case .bottomRight:
+                path.move(to: CGPoint(x: c.x, y: c.y - arm)); path.addLine(to: c); path.addLine(to: CGPoint(x: c.x - arm, y: c.y))
+            case .bottomLeft:
+                path.move(to: CGPoint(x: c.x + arm, y: c.y)); path.addLine(to: c); path.addLine(to: CGPoint(x: c.x, y: c.y - arm))
+            case .top, .bottom:
+                path.move(to: CGPoint(x: c.x - 10, y: c.y)); path.addLine(to: CGPoint(x: c.x + 10, y: c.y))
+            case .left, .right:
+                path.move(to: CGPoint(x: c.x, y: c.y - 10)); path.addLine(to: CGPoint(x: c.x, y: c.y + 10))
+            }
+            context.stroke(path, with: .color(.white), style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round))
+        }
+        .frame(width: 30, height: 30)
+    }
+}
+
+/// After the window's crossfade into crop mode, the frame settles in from
+/// slightly larger, so the crop reads as a frame closing around the picture.
+private struct EditorCropReveal: ViewModifier {
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown || RecorderMotion.reduces ? 1 : 0)
+            .scaleEffect(shown || RecorderMotion.reduces ? 1 : 1.035)
+            .onAppear {
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.86).delay(0.12)) { shown = true }
+            }
+    }
 }

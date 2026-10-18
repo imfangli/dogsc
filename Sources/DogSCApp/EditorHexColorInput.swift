@@ -71,7 +71,7 @@ struct EditorHexColorInput: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(appLocalized(title))
-                .font(.appUI(.caption))
+                .font(.appUI(size: 11))
                 // Both actual controls below already carry this context:
                 // "选择\(title)" and "\(title)十六进制值". Keep the
                 // visual heading without adding a third, non-actionable stop.
@@ -142,7 +142,7 @@ struct EditorHexColorInput: View {
 
             if draft.isDirty, !draft.isValid {
                 Text("请输入 6 位十六进制颜色，例如 #D8B26A")
-                    .font(.appUI(.caption2))
+                    .font(.appUI(size: 10))
                     .foregroundStyle(.red)
                     .accessibilityLabel(String(format: appLocalized("%@格式无效"), appLocalized(title)))
             }

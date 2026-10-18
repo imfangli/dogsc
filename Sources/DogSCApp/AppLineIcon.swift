@@ -4,7 +4,8 @@ import SwiftUI
 /// Settings and its small actions share one stroke instead of mixing symbol weights.
 struct AppLineIcon: View {
     enum Kind: Equatable {
-        case settings, sliders, record, shield, info, appearance, sun, moon
+        case settings, sliders, record, shield, info, appearance, sun, moon, globe
+        case shapeCircle, shapeRounded, shapeWide
         case bell, speaker, box, download, sparkle, display, window, microphone
         case cursor, camera, folder, check, checkCircle, warning, refresh
         case code, feedback, cup, external, chevron, person, close, arrowLeft
@@ -13,14 +14,26 @@ struct AppLineIcon: View {
         case share, chevronDown, layers
         case play, pause, stop, previousFrame, nextFrame, scissors, minus
         case waveform, eye, eyeOff, fit, grid, crop, layout, film, subtitles
+        // Editor glyphs that used to fall back to system symbols.
+        case magnet, clock, cube, link, photoAdd, paste, expand, aspect, target, move
+        case pin, speed, drop, halfCircle, bookmark, swap, speakerOff, cameraOff
+        case search, noSymbol, chevronLeft, chevronUp, noFrame, portrait, arrowRight
+        case arrowUpLeft, arrowDownRight, deleteLeft, deleteRight, list, presets
     }
 
     let kind: Kind
     var size: CGFloat = 18
 
+    /// One line weight across icon sizes: small glyphs no longer thin out
+    /// to a hairline and toolbar glyphs no longer turn heavy. Large display
+    /// icons keep their proportion.
+    static func strokeWidth(for size: CGFloat) -> CGFloat {
+        size >= 24 ? size / 14 : min(max(size / 12, 1.2), 1.55)
+    }
+
     var body: some View {
         Drawing(kind: kind)
-            .stroke(style: StrokeStyle(lineWidth: size / 12, lineCap: .round, lineJoin: .round))
+            .stroke(style: StrokeStyle(lineWidth: Self.strokeWidth(for: size), lineCap: .round, lineJoin: .round))
             .frame(width: size, height: size)
             .accessibilityHidden(true)
     }
@@ -66,6 +79,15 @@ struct AppLineIcon: View {
                 p.move(to: CGPoint(x: 7.5, y: 8)); p.addCurve(to: CGPoint(x: 10.5, y: 8), control1: CGPoint(x: 7.5, y: 4.5), control2: CGPoint(x: 10.5, y: 4.5))
             case .info:
                 circle(9, 9, 7); circle(9, 5, 0.35); line([(8, 8), (9, 8), (9, 13)]); line([(7.7, 13), (10.3, 13)])
+            case .shapeCircle:
+                circle(9, 9, 6.5)
+            case .shapeRounded:
+                rounded(2.5, 2.5, 13, 13, 4)
+            case .shapeWide:
+                rounded(1.5, 4.5, 15, 9, 2.5)
+            case .globe:
+                circle(9, 9, 7); p.addEllipse(in: CGRect(x: 5.6, y: 2, width: 6.8, height: 14))
+                line([(2, 9), (16, 9)])
             case .appearance:
                 circle(9, 9, 6.7); line([(9, 2.3), (9, 15.7)])
                 line([(5, 4), (5, 14)]); line([(7, 3), (7, 15)])
@@ -219,6 +241,103 @@ struct AppLineIcon: View {
             case .layout:
                 rounded(2, 3, 14, 12, 2)
                 rounded(5, 6, 8, 6, 1)
+            case .magnet:
+                p.move(to: CGPoint(x: 3.5, y: 2.5)); p.addLine(to: CGPoint(x: 3.5, y: 9))
+                p.addCurve(to: CGPoint(x: 14.5, y: 9), control1: CGPoint(x: 3.5, y: 17), control2: CGPoint(x: 14.5, y: 17))
+                p.addLine(to: CGPoint(x: 14.5, y: 2.5))
+                p.move(to: CGPoint(x: 7, y: 2.5)); p.addLine(to: CGPoint(x: 7, y: 9))
+                p.addCurve(to: CGPoint(x: 11, y: 9), control1: CGPoint(x: 7, y: 12.2), control2: CGPoint(x: 11, y: 12.2))
+                p.addLine(to: CGPoint(x: 11, y: 2.5))
+                line([(3.5, 2.5), (7, 2.5)]); line([(11, 2.5), (14.5, 2.5)])
+                line([(3.5, 5.5), (7, 5.5)]); line([(11, 5.5), (14.5, 5.5)])
+            case .clock:
+                circle(9, 9, 7); line([(9, 5), (9, 9), (12, 11)])
+            case .cube:
+                line([(9, 1.8), (15.5, 5.5), (15.5, 12.5), (9, 16.2), (2.5, 12.5), (2.5, 5.5), (9, 1.8)])
+                line([(2.5, 5.5), (9, 9.2), (15.5, 5.5)]); line([(9, 9.2), (9, 16.2)])
+            case .link:
+                rounded(1.5, 6, 9, 6, 3); rounded(7.5, 6, 9, 6, 3)
+            case .photoAdd:
+                rounded(1.5, 2.5, 12, 10, 2)
+                line([(3.8, 10.5), (6.6, 7.4), (8.8, 9.6), (10.2, 8.2), (11.6, 9.6)])
+                circle(10, 5.4, 0.9)
+                line([(14.5, 10.5), (14.5, 16.5)]); line([(11.5, 13.5), (17.5, 13.5)])
+            case .paste:
+                rounded(3.5, 3, 11, 13.5, 2); rounded(6.5, 1.5, 5, 3, 1.2)
+                line([(6.5, 8.5), (11.5, 8.5)]); line([(6.5, 11.5), (10, 11.5)])
+            case .expand:
+                line([(3, 8), (3, 3), (8, 3)]); line([(3, 3), (7.5, 7.5)])
+                line([(15, 10), (15, 15), (10, 15)]); line([(15, 15), (10.5, 10.5)])
+            case .aspect:
+                rounded(1.5, 3.5, 15, 11, 2.5)
+                line([(4.5, 8.5), (4.5, 6.5), (6.5, 6.5)]); line([(13.5, 9.5), (13.5, 11.5), (11.5, 11.5)])
+            case .target:
+                circle(9, 9, 6); circle(9, 9, 1.2)
+                line([(9, 1.5), (9, 4)]); line([(9, 14), (9, 16.5)])
+                line([(1.5, 9), (4, 9)]); line([(14, 9), (16.5, 9)])
+            case .move:
+                line([(9, 2), (9, 16)]); line([(2, 9), (16, 9)])
+                line([(6.8, 4.2), (9, 2), (11.2, 4.2)]); line([(6.8, 13.8), (9, 16), (11.2, 13.8)])
+                line([(4.2, 6.8), (2, 9), (4.2, 11.2)]); line([(13.8, 6.8), (16, 9), (13.8, 11.2)])
+            case .pin:
+                p.move(to: CGPoint(x: 9, y: 16))
+                p.addCurve(to: CGPoint(x: 3.5, y: 7), control1: CGPoint(x: 6, y: 12.5), control2: CGPoint(x: 3.5, y: 10))
+                p.addCurve(to: CGPoint(x: 14.5, y: 7), control1: CGPoint(x: 3.5, y: 0), control2: CGPoint(x: 14.5, y: 0))
+                p.addCurve(to: CGPoint(x: 9, y: 16), control1: CGPoint(x: 14.5, y: 10), control2: CGPoint(x: 12, y: 12.5))
+                circle(9, 7, 2)
+            case .speed:
+                p.move(to: CGPoint(x: 2, y: 12.5))
+                p.addCurve(to: CGPoint(x: 16, y: 12.5), control1: CGPoint(x: 2, y: 3), control2: CGPoint(x: 16, y: 3))
+                line([(9, 12), (12.5, 7)]); circle(9, 12, 1)
+            case .drop:
+                p.move(to: CGPoint(x: 9, y: 2))
+                p.addCurve(to: CGPoint(x: 9, y: 16), control1: CGPoint(x: 9, y: 2), control2: CGPoint(x: 2.5, y: 16))
+                p.move(to: CGPoint(x: 9, y: 2))
+                p.addCurve(to: CGPoint(x: 9, y: 16), control1: CGPoint(x: 9, y: 2), control2: CGPoint(x: 15.5, y: 16))
+            case .halfCircle:
+                circle(9, 9, 7); line([(9, 2), (9, 16)])
+                line([(6, 3), (6, 15)]); line([(3.6, 5), (3.6, 13)])
+            case .bookmark:
+                line([(4.5, 2), (13.5, 2), (13.5, 16), (9, 12.5), (4.5, 16), (4.5, 2)])
+            case .swap:
+                line([(2, 9), (16, 9)]); line([(5, 6), (2, 9), (5, 12)]); line([(13, 6), (16, 9), (13, 12)])
+            case .speakerOff:
+                line([(2, 6), (5, 6), (9, 2.7), (9, 15.3), (5, 12), (2, 12), (2, 6)])
+                line([(12, 6.5), (16.5, 11.5)]); line([(16.5, 6.5), (12, 11.5)])
+            case .cameraOff:
+                rounded(1.5, 4.5, 10.5, 9, 2); line([(12, 7), (16.5, 4.5), (16.5, 13.5), (12, 11)])
+                line([(1.5, 2), (16.5, 16)])
+            case .search:
+                circle(7.8, 7.8, 5.2); line([(11.6, 11.6), (16, 16)])
+            case .noSymbol:
+                circle(9, 9, 7); line([(4, 14), (14, 4)])
+            case .chevronLeft:
+                line([(12, 3.5), (6.5, 9), (12, 14.5)])
+            case .chevronUp:
+                line([(4, 11.5), (9, 6.5), (14, 11.5)])
+            case .noFrame:
+                rounded(2, 3.5, 14, 11, 2.5); line([(3, 16), (15, 2)])
+            case .portrait:
+                rounded(4.5, 1.5, 9, 15, 2.5)
+            case .arrowRight:
+                line([(3.5, 9), (14.5, 9)]); line([(9.5, 4), (14.5, 9), (9.5, 14)])
+            case .arrowUpLeft:
+                line([(14, 14), (4, 4)]); line([(4, 10), (4, 4), (10, 4)])
+            case .arrowDownRight:
+                line([(4, 4), (14, 14)]); line([(14, 8), (14, 14), (8, 14)])
+            case .deleteLeft, .deleteRight:
+                var q = Path()
+                q.move(to: CGPoint(x: 6, y: 3.5)); q.addLine(to: CGPoint(x: 15, y: 3.5))
+                q.addQuadCurve(to: CGPoint(x: 16.5, y: 5), control: CGPoint(x: 16.5, y: 3.5))
+                q.addLine(to: CGPoint(x: 16.5, y: 13)); q.addQuadCurve(to: CGPoint(x: 15, y: 14.5), control: CGPoint(x: 16.5, y: 14.5))
+                q.addLine(to: CGPoint(x: 6, y: 14.5)); q.addLine(to: CGPoint(x: 1.5, y: 9)); q.closeSubpath()
+                q.move(to: CGPoint(x: 8.5, y: 6.5)); q.addLine(to: CGPoint(x: 13, y: 11.5))
+                q.move(to: CGPoint(x: 13, y: 6.5)); q.addLine(to: CGPoint(x: 8.5, y: 11.5))
+                p.addPath(kind == .deleteRight ? q.applying(CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: 18, ty: 0)) : q)
+            case .list:
+                for y in [CGFloat(4.5), 9, 13.5] { circle(3.5, y, 0.6); line([(7, y), (15.5, y)]) }
+            case .presets:
+                rounded(2, 2.5, 6, 6, 1.6); rounded(10, 2.5, 6, 6, 1.6); rounded(2, 10.5, 14, 5, 1.6)
             case .film:
                 rounded(2, 3, 14, 12, 2)
                 line([(5.5, 3), (5.5, 15)]); line([(12.5, 3), (12.5, 15)])

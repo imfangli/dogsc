@@ -33,7 +33,12 @@ struct EditorTimelineMergedWaveform: View {
         WaveformEnvelopeCanvas(request: request, expansion: expanded ? 1 : 0)
             .equatable()
             .frame(width: width, height: height)
-            .animation(SpringMotion.fluid, value: expanded)
+            .animation(
+                expanded
+                    ? .spring(response: 0.42, dampingFraction: 0.86).delay(EditorTimelineSwap.inDelay)
+                    : .easeIn(duration: 0.12),
+                value: expanded
+            )
             .allowsHitTesting(false)
     }
 }
@@ -55,7 +60,9 @@ private struct WaveformEnvelopeCanvas: View, @MainActor Animatable, @MainActor E
         set { expansion = newValue }
     }
     var body: some View {
-        let ink = EditorTheme.chrome(0.56)
+        // Sound lives inside the primary recording clip: a soft sage-lime of
+        // the primary hue, quiet enough not to outweigh the effect lanes.
+        let ink = EditorConsole.waveformInk
         let cache = envelopeCache
         Canvas(rendersAsynchronously: true) { context, size in
             guard let samples = cache.samples(for: request) else { return }

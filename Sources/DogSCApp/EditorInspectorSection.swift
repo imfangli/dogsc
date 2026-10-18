@@ -18,34 +18,120 @@ struct EditorInspectorSection<Content: View>: View {
         self.content = content()
     }
 
+    @Environment(\.editorInsideTile) private var insideTile
+
     var body: some View {
-        VStack(alignment: .leading, spacing: EditorInterfaceSpacing.headingGap) {
+        // Settings grammar: a quiet caption, then one rounded tile holding
+        // the controls. Tiles are separated by space, never by rules.
+        VStack(alignment: .leading, spacing: 6) {
             if showsTitle {
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
                     if let icon {
                         Group {
                             if let kind = EditorToolbarIconSurface.lineIcon(for: icon) {
-                                AppLineIcon(kind: kind, size: 15)
+                                AppLineIcon(kind: kind, size: 12)
                             } else {
-                                Image(systemName: icon).font(.appUI(size: 13, weight: .regular))
+                                EditorSymbol(icon, size: 13.5).font(.appUI(size: 11, weight: .regular))
                             }
                         }
-                            .foregroundStyle(EditorTheme.secondaryText)
                     }
                     Text(appLocalized(title))
-                        .font(EditorTypography.sectionTitle)
-                        .foregroundStyle(EditorTheme.primaryText)
+                        .font(.appUI(size: 12, weight: .medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(EditorTheme.tertiaryText)
+                .padding(.leading, 4)
+                .accessibilityAddTraits(.isHeader)
+            }
+
+            if insideTile {
+                VStack(alignment: .leading, spacing: EditorInterfaceSpacing.controlGap) {
+                    content
+                }
+            } else {
+                VStack(alignment: .leading, spacing: EditorInterfaceSpacing.controlGap) {
+                    content
+                }
+                .padding(.horizontal, EditorInterfaceSpacing.tileInset)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(EditorTheme.cardFill,
+                            in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.tile, style: .continuous))
+                .environment(\.editorInsideTile, true)
+            }
+        }
+        .modifier(EditorSectionReveal(isNested: insideTile))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(appLocalized(title))
+    }
+}
+
+/// Top-level sections arrive with their page; nested ones just sit inside.
+private struct EditorSectionReveal: ViewModifier {
+    let isNested: Bool
+
+    func body(content: Content) -> some View {
+        if isNested { content } else { content.consoleReveal() }
+    }
+}
+
+/// A well (a segmented track, a bar's groove, a secondary button) inside a
+/// tile is cut out of that tile in the panel's own tone, rather than adding
+/// one more grey on top of its grey. Outside tiles the shared track grey stays.
+enum EditorWell {
+    static func fill(insideTile: Bool) -> Color {
+        insideTile ? EditorTheme.panelSurface : EditorChoiceStyle.track
+    }
+}
+
+private struct EditorInsideTileKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// True inside a section tile: nested groups drop their own card fill
+    /// so surfaces never stack two greys deep.
+    var editorInsideTile: Bool {
+        get { self[EditorInsideTileKey.self] }
+        set { self[EditorInsideTileKey.self] = newValue }
+    }
+}
+
+/// The one shape for explanatory notes inside a page: a flat card with a
+/// small glyph, an optional title and quiet detail lines.
+struct EditorInfoNote: View {
+    var systemImage: String = "info.circle"
+    var title: String? = nil
+    let lines: [String]
+    @Environment(\.editorInsideTile) private var insideTile
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 9) {
+            EditorSymbol(systemImage, size: 15.5)
+                .font(.appUI(size: 12, weight: .medium))
+                .foregroundStyle(EditorTheme.tertiaryText)
+                .frame(width: 16, height: 16)
+            VStack(alignment: .leading, spacing: 3) {
+                if let title {
+                    Text(appLocalized(title))
+                        .font(.appUI(size: 12, weight: .semibold))
+                        .foregroundStyle(EditorTheme.primaryText.opacity(0.86))
+                }
+                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(.appUI(size: 12)).monospacedDigit()
+                        .foregroundStyle(EditorTheme.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-
-            VStack(alignment: .leading, spacing: EditorInterfaceSpacing.controlGap) {
-                content
-            }
+            Spacer(minLength: 0)
         }
-        .padding(.vertical, showsTitle ? 4 : 0)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(appLocalized(title))
+        .padding(.horizontal, insideTile ? 0 : 12)
+        .padding(.vertical, insideTile ? 2 : 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(EditorTheme.cardFill.opacity(insideTile ? 0 : 1),
+                    in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.tile, style: .continuous))
     }
 }
 
@@ -54,6 +140,7 @@ struct EditorInspectorSection<Content: View>: View {
 /// its document-style scale overwhelms a narrow inspector and cannot express
 /// the direct action that releases an invalid selection.
 struct EditorInspectorEmptyState: View {
+    @Environment(\.consolePalette) private var palette
     let title: String
     let detail: String
     let systemImage: String
@@ -63,17 +150,17 @@ struct EditorInspectorEmptyState: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: systemImage)
+            EditorSymbol(systemImage, size: 21)
                 .font(.appUI(size: 16, weight: .semibold))
-                .foregroundStyle(EditorTheme.platinumAccent.opacity(0.82))
+                .foregroundStyle((palette?.stroke ?? EditorTheme.platinumAccent).opacity(palette == nil ? 0.82 : 1))
                 .frame(width: 38, height: 38)
                 .background(
-                    EditorTheme.platinumAccent.opacity(0.09),
+                    (palette?.fill ?? EditorTheme.platinumAccent).opacity(palette == nil ? 0.09 : 0.16),
                     in: RoundedRectangle(cornerRadius: 11, style: .continuous)
                 )
                 .overlay {
                     RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .stroke(EditorTheme.platinumAccent.opacity(0.14), lineWidth: 0.75)
+                        .stroke((palette?.stroke ?? EditorTheme.platinumAccent).opacity(palette == nil ? 0.14 : 0.35), lineWidth: 0.75)
                 }
 
             VStack(spacing: 4) {
@@ -89,7 +176,7 @@ struct EditorInspectorEmptyState: View {
 
             if let actionTitle, let action {
                 Button(action: action) {
-                    Label(appLocalized(actionTitle), systemImage: actionSystemImage)
+                    EditorSymbolLabel(appLocalized(actionTitle), systemImage: actionSystemImage)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.editorQuiet)
@@ -115,6 +202,8 @@ struct EditorSegmentedControl<Option: Hashable>: View {
     var optionHelp: ((Option) -> String)? = nil
     @Binding var selection: Option
     @Namespace private var segmentNamespace
+    @Environment(\.consolePalette) private var palette
+    @Environment(\.editorInsideTile) private var insideTile
     @State private var hoveredOption: Option?
 
     var body: some View {
@@ -123,17 +212,14 @@ struct EditorSegmentedControl<Option: Hashable>: View {
                 let isSelected = selection == option
                 let localizedTitle = appLocalized(title(option))
                 AppChoiceButton(isSelected: isSelected) {
-                    withAnimation(RecorderMotion.settle) {
+                    withAnimation(SpringMotion.settle) {
                         selection = option
                     }
                 } label: {
                     ZStack {
-                        RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous)
-                            .fill(hoveredOption == option && !isSelected ? EditorTheme.chrome(0.055) : .clear)
                         if isSelected {
-                            // The recorder's flat neutral lift: no outline, no shadow.
-                            RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous)
-                                .fill(EditorTheme.selectionWash)
+                            // The settings thumb: one raised slab travelling in a recessed track.
+                            EditorRaisedThumb(shape: Capsule(style: .continuous))
                                 .matchedGeometryEffect(id: "segmentActiveIndicator", in: segmentNamespace)
                         }
                         Group {
@@ -143,7 +229,7 @@ struct EditorSegmentedControl<Option: Hashable>: View {
                                         if let kind = EditorToolbarIconSurface.lineIcon(for: systemName) {
                                             AppLineIcon(kind: kind, size: 15)
                                         } else {
-                                            Image(systemName: systemName)
+                                            EditorSymbol(systemName, size: 14)
                                         }
                                     }
                                     .modifier(AppChoiceIconFeedback())
@@ -155,9 +241,11 @@ struct EditorSegmentedControl<Option: Hashable>: View {
                             }
                         }
                         .modifier(AppChoiceContentFeedback())
-                        .font(.appUI(size: 12, weight: .medium))
+                        .font(.appUI(size: 13, weight: isSelected ? .semibold : .regular))
                         .foregroundStyle(
-                            isSelected ? EditorTheme.primaryText : EditorTheme.secondaryText
+                            isSelected
+                                ? (palette?.ink ?? EditorTheme.primaryText)
+                                : hoveredOption == option ? EditorTheme.primaryText : EditorTheme.secondaryText
                         )
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
@@ -165,14 +253,18 @@ struct EditorSegmentedControl<Option: Hashable>: View {
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: EditorInterfaceHeight.selection)
+                    // The whole segment is the target. Without an explicit
+                    // shape only the glyphs hit-test, and the pressed glyph
+                    // shrinks, so a release could land "outside" the button.
+                    .contentShape(Capsule(style: .continuous))
                 }
 
-                .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous))
+                .appButtonKeyboardFocus(in: Capsule(style: .continuous))
                 .frame(maxWidth: .infinity)
                 .frame(height: EditorInterfaceHeight.selection)
                 .contentShape(Rectangle())
                 .onHover { hovering in
-                    withAnimation(RecorderMotion.fade) {
+                    withAnimation(SpringMotion.hover) {
                         if hovering { hoveredOption = option }
                         else if hoveredOption == option { hoveredOption = nil }
                     }
@@ -182,11 +274,13 @@ struct EditorSegmentedControl<Option: Hashable>: View {
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
-        .padding(4)
-        .background(
-            EditorTheme.groupSurface,
-            in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.group, style: .continuous)
-        )
+        .padding(2)
+        .background(EditorWell.fill(insideTile: insideTile), in: Capsule(style: .continuous))
+        // Per-option exits can be missed when a page swap moves the control
+        // under a still pointer; the track as a whole always clears hover.
+        .onHover { inside in
+            if !inside { withAnimation(SpringMotion.hover) { hoveredOption = nil } }
+        }
         .onChange(of: selection) { _, _ in hoveredOption = nil }
         .onDisappear { hoveredOption = nil }
     }
@@ -201,6 +295,7 @@ struct EditorTileSelector<Option: Hashable>: View {
     @Binding var selection: Option
     var columnCount = 3
     @Namespace private var tileNamespace
+    @Environment(\.editorInsideTile) private var insideTile
 
     var body: some View {
         // Keep these small option groups mounted so keyboard navigation can
@@ -213,24 +308,22 @@ struct EditorTileSelector<Option: Hashable>: View {
                     isSelected: selection == option,
                     namespace: tileNamespace
                 ) {
-                    withAnimation(RecorderMotion.settle) {
+                    withAnimation(SpringMotion.settle) {
                         selection = option
                     }
                 }
             }
         }
-        .padding(4)
-        .background(
-            EditorTheme.groupSurface,
-            in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.group, style: .continuous)
-        )
+        .padding(2)
+        .background(EditorWell.fill(insideTile: insideTile),
+                    in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.control, style: .continuous))
         .accessibilityElement(children: .contain)
     }
 }
 
 private struct EditorTileSelectorLayout: Layout {
     let maximumColumnCount: Int
-    private let spacing: CGFloat = 6
+    private let spacing: CGFloat = 2
 
     func makeCache(subviews: Subviews) -> CGFloat {
         let naturalWidth = subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
@@ -284,6 +377,7 @@ private struct EditorTileSelectorButton: View {
     let isSelected: Bool
     let namespace: Namespace.ID
     let action: () -> Void
+    @Environment(\.consolePalette) private var palette
     @State private var isHovered = false
 
     var body: some View {
@@ -293,7 +387,7 @@ private struct EditorTileSelectorButton: View {
                     if let kind = EditorToolbarIconSurface.lineIcon(for: icon) {
                         AppLineIcon(kind: kind, size: 15)
                     } else {
-                        Image(systemName: icon).font(.appUI(size: 12, weight: .regular))
+                        EditorSymbol(icon, size: 15.5).font(.appUI(size: 12, weight: .regular))
                     }
                 }
                 .modifier(AppChoiceIconFeedback())
@@ -305,26 +399,27 @@ private struct EditorTileSelectorButton: View {
             }
             .modifier(AppChoiceContentFeedback())
             .foregroundStyle(
-                EditorTheme.chrome(isSelected ? 0.88 : isHovered ? 0.82 : 0.62)
+                isSelected && palette != nil
+                    ? AnyShapeStyle(palette!.ink)
+                    : AnyShapeStyle(EditorTheme.chrome(isSelected ? 0.88 : isHovered ? 0.82 : 0.62))
             )
             .frame(maxWidth: .infinity)
             .frame(height: EditorInterfaceHeight.selection)
             .background {
                 if isSelected {
-                    RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous)
-                        .fill(EditorTheme.selectionWash)
+                    EditorRaisedThumb(shape: RoundedRectangle(cornerRadius: EditorInterfaceRadius.control - 2, style: .continuous))
                         .matchedGeometryEffect(id: "activeTileSelector", in: namespace)
                 } else if isHovered {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(EditorTheme.chrome(0.075))
+                    RoundedRectangle(cornerRadius: EditorInterfaceRadius.control - 2, style: .continuous)
+                        .fill(EditorChoiceStyle.hover)
                 }
             }
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: EditorInterfaceRadius.group, style: .continuous))
         }
 
-        .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.group, style: .continuous))
         .onHover { hovering in
-            withAnimation(RecorderMotion.fade) {
+            withAnimation(SpringMotion.hover) {
                 isHovered = hovering
             }
         }

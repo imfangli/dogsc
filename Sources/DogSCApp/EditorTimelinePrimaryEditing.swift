@@ -46,7 +46,7 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
         Button {
             splitPrimarySegmentAtPlayhead()
         } label: {
-            Label("在播放头处分割", systemImage: "scissors")
+            EditorSymbolLabel("在播放头处分割", systemImage: "scissors")
         }
         .disabled(!canSplitPrimarySegment(segment))
 
@@ -58,7 +58,7 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
                     setPrimarySegmentPlaybackRate(segment.id, rate: rate)
                 } label: {
                     if abs(segment.playbackRate - rate) < 0.000_1 {
-                        Label(timelinePlaybackRateText(rate), systemImage: "checkmark")
+                        EditorSymbolLabel(timelinePlaybackRateText(rate), systemImage: "checkmark")
                     } else {
                         Text(timelinePlaybackRateText(rate))
                     }
@@ -66,11 +66,11 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
             }
             Divider()
             Button {} label: {
-                Label("按住 Control 拖右端自由变速", systemImage: "arrow.left.and.right")
+                EditorSymbolLabel("按住 Control 拖右端自由变速", systemImage: "arrow.left.and.right")
             }
             .disabled(true)
         } label: {
-            Label("片段速度", systemImage: "speedometer")
+            EditorSymbolLabel("片段速度", systemImage: "speedometer")
         }
 
         Divider()
@@ -78,14 +78,14 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
         Button {
             rippleDeleteBeforePlayhead()
         } label: {
-            Label("波纹删除播放头之前（Q）", systemImage: "delete.left")
+            EditorSymbolLabel("波纹删除播放头之前（Q）", systemImage: "delete.left")
         }
         .disabled(!canRippleDeleteBeforePlayhead(in: segment))
 
         Button {
             rippleDeleteAfterPlayhead()
         } label: {
-            Label("波纹删除播放头之后（W）", systemImage: "delete.right")
+            EditorSymbolLabel("波纹删除播放头之后（W）", systemImage: "delete.right")
         }
         .disabled(!canRippleDeleteAfterPlayhead(in: segment))
 
@@ -101,7 +101,7 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
                 Button {
                     restorePrimaryLeadingGap(gap)
                 } label: {
-                    Label(String(format: appLocalized("还原开头剪辑（已剪 %@）"), timelineTimestamp(gap.removedDuration)), systemImage: "arrow.uturn.backward")
+                    EditorSymbolLabel(String(format: appLocalized("还原开头剪辑（已剪 %@）"), timelineTimestamp(gap.removedDuration)), systemImage: "arrow.uturn.backward")
                 }
             }
 
@@ -110,13 +110,13 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
                     Button {
                         restorePrimaryGap(junction)
                     } label: {
-                        Label(String(format: appLocalized("还原前侧剪切缺口（已剪 %@）"), timelineTimestamp(junction.removedDuration)), systemImage: "arrow.uturn.backward")
+                        EditorSymbolLabel(String(format: appLocalized("还原前侧剪切缺口（已剪 %@）"), timelineTimestamp(junction.removedDuration)), systemImage: "arrow.uturn.backward")
                     }
                 } else {
                     Button {
                         mergePrimarySegments(at: junction)
                     } label: {
-                        Label("合并与前一片段", systemImage: "link")
+                        EditorSymbolLabel("合并与前一片段", systemImage: "link")
                     }
                 }
             }
@@ -126,13 +126,13 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
                     Button {
                         restorePrimaryGap(junction)
                     } label: {
-                        Label(String(format: appLocalized("还原后侧剪切缺口（已剪 %@）"), timelineTimestamp(junction.removedDuration)), systemImage: "arrow.uturn.backward")
+                        EditorSymbolLabel(String(format: appLocalized("还原后侧剪切缺口（已剪 %@）"), timelineTimestamp(junction.removedDuration)), systemImage: "arrow.uturn.backward")
                     }
                 } else {
                     Button {
                         mergePrimarySegments(at: junction)
                     } label: {
-                        Label("合并与后一片段", systemImage: "link")
+                        EditorSymbolLabel("合并与后一片段", systemImage: "link")
                     }
                 }
             }
@@ -141,7 +141,7 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
                 Button {
                     restorePrimaryTrailingGap(gap)
                 } label: {
-                    Label(String(format: appLocalized("还原结尾剪辑（已剪 %@）"), timelineTimestamp(gap.removedDuration)), systemImage: "arrow.uturn.backward")
+                    EditorSymbolLabel(String(format: appLocalized("还原结尾剪辑（已剪 %@）"), timelineTimestamp(gap.removedDuration)), systemImage: "arrow.uturn.backward")
                 }
             }
         }
@@ -152,7 +152,7 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
             selectPrimarySegment(segment.id)
             removePrimarySegment(id: segment.id)
         } label: {
-            Label("删除主片段", systemImage: "trash")
+            EditorSymbolLabel("删除主片段", systemImage: "trash")
         }
     }
 
@@ -174,7 +174,7 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
         if abs(rate.rounded() - rate) < 0.000_1 {
             return "\(Int(rate.rounded()))×"
         }
-        return String(format: "%.1f×", rate)
+        return EditorSliderValueFormat.compact(rate, unit: "×")
     }
 
     func segmentJunctionAction(
@@ -189,14 +189,12 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
         } label: {
             ZStack {
                 Circle()
-                    .fill(Color.black.opacity(0.9))
-                Circle()
-                    .stroke(EditorTheme.mediaAccent.opacity(0.95), lineWidth: 1)
-                Image(systemName: junction.hasRemovedSourceGap
+                    .fill(EditorConsole.Track.primary.fill)
+                EditorSymbol(junction.hasRemovedSourceGap
                     ? "arrow.uturn.backward"
-                    : "link")
+                    : "link", size: 10.5)
                     .font(.appUI(size: 8, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(EditorConsole.Track.primary.ink)
             }
             .frame(width: 17, height: 17)
             .frame(width: 28, height: 28)
@@ -227,11 +225,10 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
             restorePrimaryLeadingGap(gap)
         } label: {
             ZStack {
-                Circle().fill(Color.black.opacity(0.9))
-                Circle().stroke(EditorTheme.mediaAccent.opacity(0.95), lineWidth: 1)
-                Image(systemName: "arrow.uturn.backward")
+                Circle().fill(EditorConsole.Track.primary.fill)
+                EditorSymbol("arrow.uturn.backward", size: 10.5)
                     .font(.appUI(size: 8, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(EditorConsole.Track.primary.ink)
             }
             .frame(width: 17, height: 17)
             .frame(width: 28, height: 28)
@@ -249,11 +246,10 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
             restorePrimaryTrailingGap(gap)
         } label: {
             ZStack {
-                Circle().fill(Color.black.opacity(0.9))
-                Circle().stroke(EditorTheme.mediaAccent.opacity(0.95), lineWidth: 1)
-                Image(systemName: "arrow.uturn.backward")
+                Circle().fill(EditorConsole.Track.primary.fill)
+                EditorSymbol("arrow.uturn.backward", size: 10.5)
                     .font(.appUI(size: 8, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(EditorConsole.Track.primary.ink)
             }
             .frame(width: 17, height: 17)
             .frame(width: 28, height: 28)
@@ -591,12 +587,12 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
         duration: TimeInterval
     ) -> some View {
         let intent = EditorTimelineGestureIntent.primaryTrim(segment.id, edge)
-        return Capsule(style: .continuous)
-            .fill(EditorTheme.chrome(0.95))
-            .frame(
-                width: 3,
-                height: min(max(primaryVideoHeight - 20, 24), 44)
+        return EditorTrimGrip(
+                color: EditorConsole.Track.primary.stroke,
+                height: min(max(primaryVideoHeight * 0.3, 12), 20)
             )
+            // The compact grip owns its backing. Keep the existing full-height
+            // hit area without drawing a tall capsule over the recording.
             .frame(width: 12, height: primaryVideoHeight)
             .contentShape(Rectangle())
             .highPriorityGesture(
@@ -605,6 +601,7 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
                     coordinateSpace: .named(editorTimelineDocumentCoordinateSpace)
                     )
                     .onChanged { value in
+                EditorDragFrameCoalescer.shared.submit {
                         let isRetime = edge == .right && (
                             primaryRetimeDraft?.segmentID == segment.id
                                 || (primaryTrimDraft == nil
@@ -698,7 +695,9 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
                             )
                         )
                     }
+}
                     .onEnded { _ in
+                EditorDragFrameCoalescer.shared.flush()
                         let activeIntent = gestureOwnership.activeIntent
                         guard activeIntent == intent
                             || activeIntent == .primaryRetime(segment.id) else { return }
@@ -831,22 +830,32 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
 
     func splitPrimarySegmentAtPlayhead() {
         guard primarySplitCandidate != nil else { return }
-        let splitTime = primarySplitTime
+        performPrimarySplit(at: primarySplitTime)
+    }
+
+    /// A cut changes ownership, not the position of the retained pictures.
+    /// Commit both pieces and the right-hand selection atomically, preventing
+    /// lane membership/selection animations from shrinking and sliding them.
+    /// Both retained pieces remain visible at their original hit areas.
+    private func performPrimarySplit(at splitTime: TimeInterval) {
         let rightID = UUID()
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
         do {
-            try editorStore.splitPrimarySegment(
-                atOutputTime: splitTime,
-                fullSourceDuration: fullSourceDuration,
-                newRightSegmentID: rightID,
-                actionName: "分割主片段"
-            )
+            try withTransaction(transaction) {
+                try editorStore.splitPrimarySegment(
+                    atOutputTime: splitTime,
+                    fullSourceDuration: fullSourceDuration,
+                    newRightSegmentID: rightID,
+                    actionName: "分割主片段"
+                )
+                hoveredPrimarySegmentID = nil
+                selectPrimarySegment(rightID)
+                seekTimeline(to: min(splitTime, timelineDuration))
+            }
         } catch {
             onError(error.localizedDescription)
-            return
         }
-        hoveredPrimarySegmentID = nil
-        selectPrimarySegment(rightID)
-        seekTimeline(to: min(splitTime, timelineDuration))
     }
 
     /// Option+单击快捷切分：按点击位置的比例换算输出时间，与剪刀按钮同一条
@@ -884,21 +893,7 @@ var primarySegmentJunctions: [EditorTimelineSegmentJunction] {
         )
         guard outputTime > segment.outputStart + minimumPrimarySegmentDuration,
               outputTime < segment.outputEnd - minimumPrimarySegmentDuration else { return }
-        let rightID = UUID()
-        do {
-            try editorStore.splitPrimarySegment(
-                atOutputTime: outputTime,
-                fullSourceDuration: fullSourceDuration,
-                newRightSegmentID: rightID,
-                actionName: "分割主片段"
-            )
-        } catch {
-            onError(error.localizedDescription)
-            return
-        }
-        hoveredPrimarySegmentID = nil
-        selectPrimarySegment(rightID)
-        seekTimeline(to: outputTime)
+        performPrimarySplit(at: outputTime)
     }
 
     func movePrimarySegment(_ draggedID: UUID, toIndex destination: Int) {

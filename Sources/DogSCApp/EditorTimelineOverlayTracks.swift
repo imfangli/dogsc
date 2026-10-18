@@ -50,7 +50,7 @@ extension EditorTimelineView {
                 id: $0.id,
                 timing: $0.timing,
                 title: appLocalized($0.style == .spotlight ? "突出" : "柔化"),
-                tint: .orange,
+                tint: editorOverlayClip,
                 kind: .mosaic,
                 layerIndex: -1
             )
@@ -118,7 +118,7 @@ extension EditorTimelineView {
             return
         }
         timeline.mosaicClips[index] = clip
-        replaceOverlayTimeline(timeline, actionName: "修剪打码")
+        replaceOverlayTimeline(timeline, actionName: clip.style == .spotlight ? "修剪突出" : "修剪柔化")
     }
 
     func trimStickerClip(
@@ -185,7 +185,7 @@ extension EditorTimelineView {
         )
         timeline.mosaicClips.replaceSubrange(index...index, with: [left, right])
         do {
-            try editorStore.replaceTimeline(with: timeline, actionName: "分割打码")
+            try editorStore.replaceTimeline(with: timeline, actionName: original.style == .spotlight ? "分割突出" : "分割柔化")
             editorStore.selection = .mosaic(right.id)
         } catch {
             onError(error.localizedDescription)
@@ -249,7 +249,7 @@ extension EditorTimelineView {
             .padding(.vertical, 10)
             if let range = overlayCreateRange, range.upperBound - range.lowerBound > 0.01 {
                 RoundedRectangle(cornerRadius: 7)
-                    .fill(editorOverlayClip.opacity(0.18))
+                    .fill(EditorTheme.chrome(0.08))
                     .overlay(RoundedRectangle(cornerRadius: 7)
                         .strokeBorder(editorOverlayClip.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
                     .frame(width: max(CGFloat((range.upperBound - range.lowerBound) / duration) * width, 3), height: 30)
@@ -294,19 +294,12 @@ extension EditorTimelineView {
                     isHovered: isHovered
                 )
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(
-                        isSelected
-                            ? EditorTheme.chrome(0.20)
-                            : EditorTheme.chrome(isHovered ? 0.12 : 0.075)
-                    )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(clip.tint.opacity(isSelected ? 0.34 : isHovered ? 0.24 : 0.18))
-                    }
+                    .fill(EditorConsole.Track.overlay.timelineSurface(emphasis))
                     .overlay(alignment: .leading) {
                         if clipWidth >= 52 {
                             Text(clip.title)
                                 .font(.appUI(size: 10, weight: .semibold))
+                                .foregroundStyle(EditorConsole.Track.overlay.softInk)
                                 .lineLimit(1)
                                 .padding(.horizontal, 9)
                         }
@@ -315,11 +308,11 @@ extension EditorTimelineView {
                         if emphasis.showsHandles, clipWidth >= 22 {
                             HStack(spacing: 0) {
                                 Capsule()
-                                    .fill(EditorTheme.chrome(0.9))
+                                    .fill(EditorConsole.Track.overlay.stroke)
                                     .frame(width: 3, height: 13)
                                 Spacer(minLength: 0)
                                 Capsule()
-                                    .fill(EditorTheme.chrome(0.9))
+                                    .fill(EditorConsole.Track.overlay.stroke)
                                     .frame(width: 3, height: 13)
                             }
                             .padding(.horizontal, 2)
@@ -327,10 +320,13 @@ extension EditorTimelineView {
                             .allowsHitTesting(false)
                         }
                     }
-                    .editorTimelineClipChrome(cornerRadius: 7, emphasis: emphasis)
+                    .editorTimelineClipChrome(cornerRadius: 7, emphasis: emphasis, tint: EditorConsole.Track.overlay.stroke)
                     .contentShape(Rectangle())
                 .frame(width: clipWidth, height: 30)
+                .editorClipDragFeedback(overlayTimelineDrag?.id == clip.id && overlayTimelineDrag?.kind == clip.kind
+                    && overlayTimelineDrag?.mode == .move)
                 .offset(x: x)
+                .transition(.identity)
                 .zIndex(emphasis == .editing ? 4 : isSelected ? 3 : isHovered ? 1 : 0)
                 .onHover { hovering in
                     if hovering {
@@ -376,6 +372,7 @@ extension EditorTimelineView {
     ) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                EditorDragFrameCoalescer.shared.submit {
                 if overlayTimelineDrag == nil, overlayCreateRange == nil {
                     beginOverlayTimelineDrag(
                         at: value.startLocation.x,
@@ -413,7 +410,9 @@ extension EditorTimelineView {
                     : [drag.mode == .leading ? timing.startTime : timing.endTime])
                 updateOverlayTimingDraft(drag: drag, timing: timing)
             }
+}
             .onEnded { value in
+                EditorDragFrameCoalescer.shared.flush()
                 if gestureOwnership.activeIntent == .overlayCreate, let range = overlayCreateRange {
                     overlayCreateRange = nil
                     overlayCreateStart = nil
@@ -429,9 +428,7 @@ extension EditorTimelineView {
                     var timeline = editorStore.project.timeline
                     timeline.mosaicClips.append(clip)
                     do {
-                        try withAnimation(SpringMotion.fluid) {
-                            try editorStore.replaceTimeline(with: timeline, actionName: "添加柔化")
-                        }
+                        try editorStore.replaceTimeline(with: timeline, actionName: "添加柔化")
                         activateTimelineSelection(.mosaic(clip.id))
                     } catch { onError(error.localizedDescription) }
                     return

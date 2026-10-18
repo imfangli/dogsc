@@ -3,6 +3,7 @@ import RecorderCore
 import SwiftUI
 
 struct ZoomFocusMap: View {
+    @Environment(\.consolePalette) private var palette
     @ObservedObject var mediaSession: EditorMediaSession
     let outputTime: TimeInterval
     let sourcePixelSize: CGSize
@@ -62,7 +63,7 @@ struct ZoomFocusMap: View {
                             focus = NormalizedPoint(x: 0.5, y: 0.5)
                             endFocusEditing()
                         } label: {
-                            Image(systemName: "scope")
+                            EditorSymbol("scope", size: 18)
                                 .font(.appUI(size: 14))
                                 .frame(width: 32, height: 30)
                         }
@@ -96,7 +97,7 @@ struct ZoomFocusMap: View {
             let isActive = isEditingFocus || isCoordinateEditing
 
             ZStack {
-                EditorTheme.chrome(0.025)
+                EditorTheme.chrome(0.04)
 
                 if let thumbnail {
                     Image(nsImage: thumbnail)
@@ -138,34 +139,41 @@ struct ZoomFocusMap: View {
                         path.addLine(to: CGPoint(x: mapRect.maxX, y: point.y))
                     }
                     .stroke(
-                        EditorTheme.platinumAccent.opacity(0.30),
+                        (palette?.fill ?? EditorTheme.platinumAccent).opacity(0.7),
                         style: StrokeStyle(lineWidth: 0.75, dash: [2.5, 3.5])
                     )
                     .allowsHitTesting(false)
                 }
 
                 if allowsEditing {
-                Image(systemName: "plus")
-                    .font(.appUI(size: 24, weight: .ultraLight))
-                    .foregroundStyle(EditorTheme.selectionTint)
-                    .frame(width: 28, height: 28)
-                    .background(.white.opacity(0.9), in: Circle())
-                    .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
+                // The editor's one position puck: paper disc, ink pip.
+                ZStack {
+                    Circle()
+                        .fill(.white)
+                        .overlay { Circle().strokeBorder(.black.opacity(0.08), lineWidth: 0.5) }
+                        .shadow(color: .black.opacity(0.18), radius: 0.5, y: 0.5)
+                        .shadow(color: .black.opacity(0.22), radius: 4, y: 2)
+                        .frame(width: 22, height: 22)
+                    Circle()
+                        .fill(Color(white: 0.12))
+                        .frame(width: 8, height: 8)
+                }
+                .scaleEffect(isActive && !RecorderMotion.reduces ? 1.1 : 1)
+                .animation(SpringMotion.snappy, value: isActive)
                 .position(point)
                 .transaction { $0.animation = nil }
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .stroke(
-                        isActive
-                            ? EditorTheme.platinumAccent.opacity(0.28)
-                            : EditorTheme.chrome(isMapHovered ? 0.18 : 0.11),
-                        lineWidth: isActive ? 1 : 0.75
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(
+                        (palette?.fill ?? EditorTheme.platinumAccent).opacity(isActive ? 0.8 : isMapHovered ? 0.35 : 0),
+                        lineWidth: 0.5
                     )
+                    .animation(SpringMotion.hover, value: isMapHovered)
             }
-            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in

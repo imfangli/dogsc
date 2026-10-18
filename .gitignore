@@ -12,3 +12,4 @@ DerivedData/
 *.keychain-db
 *.dogscproject/
 *.silkyproject/
+/open-check-project.command

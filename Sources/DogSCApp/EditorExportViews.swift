@@ -106,51 +106,50 @@ struct ExportSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                AppLineIcon(kind: .share, size: 22)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(appLocalized(exportScope.outputRange == nil ? "导出作品" : "导出选区"))
+                    .font(.appUI(size: 17, weight: .semibold))
                     .foregroundStyle(EditorTheme.primaryText)
-                    .frame(width: 44, height: 44)
-                    .background(EditorTheme.controlWell, in: Circle())
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(appLocalized(exportScope.outputRange == nil ? "导出作品" : "导出选区"))
-                        .font(.appUI(size: 18, weight: .medium))
-                    Text(projectDisplayName).font(.appUI(size: 12)).foregroundStyle(.secondary).lineLimit(1)
-                }
+                Text(projectDisplayName)
+                    .font(.appUI(size: 12))
+                    .foregroundStyle(EditorTheme.tertiaryText)
+                    .lineLimit(1).truncationMode(.middle)
                 Spacer()
-                Button { dismiss() } label: { AppLineIcon(kind: .close, size: 13) }
-                    .buttonStyle(.editorDismissIcon)
+                Button { dismiss() } label: { AppLineIcon(kind: .close, size: 12) }
+                    .buttonStyle(.editorDismissIcon(size: 28))
                     .disabled(exporter.isExporting)
                     .help(appLocalized(exporter.isExporting ? "取消导出后可关闭" : "关闭导出面板"))
-                    .accessibilityLabel("关闭导出面板")
-            }.padding(.horizontal, 28).padding(.vertical, 22)
-            HStack(alignment: .top, spacing: 28) {
+                    .accessibilityLabel(appLocalized("关闭导出面板"))
+            }
+            .padding(.horizontal, 24).padding(.top, 22).padding(.bottom, 16)
+            HStack(alignment: .top, spacing: 16) {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 16) {
                         exportDestination
                         exportOutputKindChoices
                         if selectedOutputKind == .video {
-                            exportResolutionChoices
-                            exportFrameRateChoices
+                            exportSpecChoices
                         } else {
                             Text("导出剪辑后的系统声音与麦克风混音。")
-                                .font(.appUI(size: 12)).foregroundStyle(.secondary)
+                                .font(.appUI(size: 12)).foregroundStyle(EditorTheme.secondaryText)
+                                .padding(.leading, 4)
                         }
                         exportSubtitleOption
                     }
-                    .padding(1)
                     .padding(.bottom, 8)
-                }.scrollIndicators(.automatic).frame(width: 376)
+                }
+                .scrollIndicators(.automatic)
+                .frame(width: 380)
                 exportPreviewSummary
-                    .padding(18)
+                    .padding(14)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .background(EditorTheme.controlWell, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .background(EditorTheme.cardFill,
+                                in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.tile, style: .continuous))
             }
-            .padding(.horizontal, 28).padding(.bottom, 24).frame(height: exportContentHeight)
-            Divider().overlay(EditorTheme.hairline)
-            exportFooter.padding(.horizontal, 28).padding(.vertical, 20)
+            .padding(.horizontal, 24).frame(height: exportContentHeight)
+            exportFooter.padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 22)
         }
-        .frame(width: 840)
+        .frame(width: 820)
         .background(EditorTheme.panelSurface)
         .appControlFocusAppearance()
         .animation(RecorderMotion.reduces ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.28), value: selectedOutputKind)
@@ -187,6 +186,12 @@ struct ExportSheet: View {
             exporter.resetResultForNewExportSelection()
             refreshSuggestedOutputURL()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .appLanguageDidChange)) { _ in
+            refreshAutomaticOutputNameIfNeeded()
+        }
+        .onChange(of: isEditingOutputName) { _, editing in
+            if !editing { refreshAutomaticOutputNameIfNeeded() }
+        }
         .sheet(isPresented: $showsSupportSheet) { AppSupportSheet() }
     }
 
@@ -205,7 +210,7 @@ struct ExportSheet: View {
                 Button { showsSupportSheet = true } label: {
                     Label { Text("请杯咖啡") } icon: { AppLineIcon(kind: .cup, size: 16) }
                         .foregroundStyle(EditorTheme.secondaryText)
-                        .fixedSize().frame(height: 34)
+                        .fixedSize()
                 }
                 .buttonStyle(.editorQuiet)
                 .accessibilityIdentifier("export.completed.support")
@@ -216,10 +221,10 @@ struct ExportSheet: View {
                     NSWorkspace.shared.activateFileViewerSelecting(files)
                 } label: {
                     Label { Text("在 Finder 中显示") } icon: { AppLineIcon(kind: .folder, size: 16) }
-                        .fixedSize().frame(height: 34)
+                        .fixedSize()
                 }
                 .buttonStyle(.editorQuiet)
-                .accessibilityLabel("在 Finder 中显示导出文件")
+                .accessibilityLabel(appLocalized("在 Finder 中显示导出文件"))
 
                 Button { dismiss() } label: {
                     Text("完成").frame(minWidth: 44)
@@ -246,8 +251,8 @@ struct ExportSheet: View {
                     Spacer(minLength: 12)
                     if !exporter.isExporting {
                         Button { dismiss() } label: {
-                            Text("取消").frame(minWidth: 44, minHeight: EditorInterfaceHeight.action)
-                        }.buttonStyle(.editorGhost)
+                            Text("取消").frame(minWidth: 44)
+                        }.buttonStyle(.editorQuiet)
                     }
                     Button {
                         if exporter.isExporting { exporter.cancelExport() }
@@ -278,48 +283,68 @@ struct ExportSheet: View {
     }
 
     private var exportContentHeight: CGFloat {
-        if selectedOutputKind == .video { return 528 }
-        return exportScope.outputRange == nil ? 356 : 400
+        let preferred: CGFloat = selectedOutputKind == .video
+            ? (exportScope.outputRange == nil ? 412 : 436)
+            : (exportScope.outputRange == nil ? 300 : 344)
+        let screenHeight = (NSApp.keyWindow?.screen ?? NSScreen.main)?.visibleFrame.height ?? 900
+        return min(preferred + 76, max(220, screenHeight - 180))
     }
 
     private var exportDestination: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text("文件名").font(.appUI(size: 12)).foregroundStyle(.secondary)
-            Group {
-                if isEditingOutputName {
-                    exportFileNameRow
-                } else {
-                    Button { beginOutputNameEditing() } label: {
+        VStack(alignment: .leading, spacing: 6) {
+            exportCaption("文件")
+            VStack(spacing: 2) {
+                Group {
+                    if isEditingOutputName {
                         exportFileNameRow
+                    } else {
+                        Button { beginOutputNameEditing() } label: {
+                            exportFileNameRow
+                        }
+                        .buttonStyle(EditorToolbarPressButtonStyle(cornerRadius: EditorInterfaceRadius.control))
+                        .help(appLocalized("更改文件名"))
+                        .accessibilityLabel(appLocalized("更改文件名"))
+                        .accessibilityValue(selectedOutputURL?.lastPathComponent ?? "\(projectDisplayName).\(selectedOutputKind.fileExtension)")
                     }
-                    .buttonStyle(EditorToolbarPressButtonStyle(cornerRadius: EditorInterfaceRadius.group))
-                    .help(appLocalized("更改文件名"))
-                    .accessibilityLabel(appLocalized("更改文件名"))
-                    .accessibilityValue(selectedOutputURL?.lastPathComponent ?? "\(projectDisplayName).\(selectedOutputKind.fileExtension)")
                 }
+                .disabled(exporter.isExporting)
+                Button { chooseOutputLocation() } label: {
+                    HStack(spacing: 8) {
+                        AppLineIcon(kind: .folder, size: 14)
+                        Text(selectedOutputDirectory ?? appLocalized("选择保存位置"))
+                            .font(.appUI(size: 12)).lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 4)
+                        AppLineIcon(kind: .chevron, size: 10)
+                    }
+                    .foregroundStyle(EditorTheme.secondaryText)
+                    .padding(.horizontal, 10)
+                    .frame(height: 36)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(EditorToolbarPressButtonStyle(cornerRadius: EditorInterfaceRadius.control))
+                .disabled(exporter.isExporting)
+                .help(appLocalized("选择导出文件夹"))
+                .accessibilityLabel(appLocalized("保存位置")).accessibilityValue(selectedOutputDirectory ?? appLocalized("尚未选择"))
             }
-            .disabled(exporter.isExporting)
+            .padding(4)
+            .background(EditorTheme.cardFill,
+                        in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.tile, style: .continuous))
             if let outputNameError {
                 Text(appLocalized(outputNameError))
                     .font(.appUI(size: 11))
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 4)
             }
-            Button { chooseOutputLocation() } label: {
-                HStack(spacing: 7) {
-                    AppLineIcon(kind: .folder, size: 15)
-                    Text(selectedOutputDirectory ?? appLocalized("选择保存位置"))
-                        .font(.appUI(size: 11)).lineLimit(1).truncationMode(.middle)
-                    Spacer(minLength: 4)
-                    AppLineIcon(kind: .chevron, size: 11)
-                }
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-                .frame(height: 32)
-            }.buttonStyle(.editorToolbarPress).disabled(exporter.isExporting)
-                .help(appLocalized("选择导出文件夹"))
-                .accessibilityLabel("保存位置").accessibilityValue(selectedOutputDirectory ?? appLocalized("尚未选择"))
         }
+    }
+
+    private func exportCaption(_ key: String) -> some View {
+        Text(appLocalized(key))
+            .font(.appUI(size: 12, weight: .medium))
+            .foregroundStyle(EditorTheme.tertiaryText)
+            .padding(.leading, 4)
+            .accessibilityAddTraits(.isHeader)
     }
 
     private var exportFileNameRow: some View {
@@ -346,27 +371,25 @@ struct ExportSheet: View {
                     .accessibilityLabel(appLocalized("文件名"))
             } else {
                 Text(selectedOutputURL?.deletingPathExtension().lastPathComponent ?? projectDisplayName)
-                    .font(.appUI(size: 13)).lineLimit(1).truncationMode(.middle)
+                    .font(.appUI(size: 13, weight: .medium)).foregroundStyle(EditorTheme.primaryText)
+                    .lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 8)
             }
             Text("." + selectedOutputKind.fileExtension)
-                .font(.appUI(size: 12)).foregroundStyle(.secondary)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(EditorTheme.chrome(0.035), in: Capsule())
+                .font(.appUI(size: 12)).foregroundStyle(EditorTheme.tertiaryText)
             if !isEditingOutputName {
-                AppLineIcon(kind: .pencil, size: 14).foregroundStyle(.secondary)
+                AppLineIcon(kind: .pencil, size: 12).foregroundStyle(EditorTheme.tertiaryText)
             }
         }
-        .padding(.horizontal, 12).frame(height: 44)
-        .background(EditorTheme.controlWell, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, 10).frame(height: 36)
+        .background(EditorTheme.chrome(isEditingOutputName ? 0.06 : 0),
+                    in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.control, style: .continuous))
     }
 
     private var exportPreviewSummary: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(appLocalized(selectedOutputKind == .video ? "当前画面" : "音频导出"))
-                .font(.appUI(size: 12)).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 12) {
             ZStack {
-                EditorTheme.chrome(0.025)
+                EditorCanvasRestingCover(showsNote: false)
                 if selectedOutputKind == .video {
                     CanvasPreview(
                         editorStore: editorStore, mediaSession: mediaSession,
@@ -386,7 +409,8 @@ struct ExportSheet: View {
                     }.foregroundStyle(EditorTheme.platinumMuted)
                 }
             }
-            .frame(height: exportScope.outputRange == nil ? 168 : 140).clipShape(RoundedRectangle(cornerRadius: EditorInterfaceRadius.card, style: .continuous))
+            .frame(height: exportScope.outputRange == nil ? 190 : 160)
+            .clipShape(RoundedRectangle(cornerRadius: EditorInterfaceRadius.control, style: .continuous))
             .accessibilityHidden(true)
             VStack(spacing: 0) {
                 exportSummaryRow("格式", value: selectedOutputKind == .video ? "MP4" : "M4A")
@@ -400,7 +424,7 @@ struct ExportSheet: View {
                 exportSummaryRow("时长", value: Self.exportTimecode(exportScope.outputRange?.duration ?? mediaSession.outputDuration))
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("导出规格").accessibilityValue(outputConfigurationSummary)
+            .accessibilityLabel(appLocalized("导出规格")).accessibilityValue(outputConfigurationSummary)
             if let range = exportScope.outputRange {
                 exportRangeSummary(range)
             }
@@ -412,7 +436,7 @@ struct ExportSheet: View {
             Text(appLocalized(title)).foregroundStyle(EditorTheme.secondaryText)
             Spacer()
             Text(value).foregroundStyle(EditorTheme.primaryText).monospacedDigit()
-        }.font(EditorTypography.helper).frame(height: 28)
+        }.font(.appUI(size: 12)).frame(height: 30)
     }
 
     private var exportDimensionsText: String {
@@ -428,8 +452,8 @@ struct ExportSheet: View {
     }
 
     private var exportOutputKindChoices: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("导出内容").font(EditorTypography.controlLabel).foregroundStyle(EditorTheme.primaryText)
+        VStack(alignment: .leading, spacing: 6) {
+            exportCaption("导出内容")
             EditorSegmentedControl(
                 options: [ExportOutputKind.video, .audio],
                 title: { $0 == .video ? "视频成片" : "仅音频" },
@@ -458,9 +482,22 @@ struct ExportSheet: View {
         return "\(dimensions.width) × \(dimensions.height) px · \(settings.frameRate.rawValue) fps · \(time) · MP4\(subtitles)"
     }
 
+    private var exportSpecChoices: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            exportCaption("规格")
+            VStack(alignment: .leading, spacing: 10) {
+                exportResolutionChoices
+                exportFrameRateChoices
+            }
+            .padding(12)
+            .background(EditorTheme.cardFill,
+                        in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.tile, style: .continuous))
+        }
+    }
+
     private var exportResolutionChoices: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("分辨率").font(EditorTypography.controlLabel).foregroundStyle(EditorTheme.primaryText)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("分辨率").font(.appUI(size: 12)).foregroundStyle(EditorTheme.secondaryText)
             EditorSegmentedControl(
                 options: CanvasResolution.allCases,
                 title: { $0 == .source ? "原始素材" : $0.rawValue },
@@ -473,8 +510,8 @@ struct ExportSheet: View {
     }
 
     private var exportFrameRateChoices: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("帧率").font(EditorTypography.controlLabel).foregroundStyle(EditorTheme.primaryText)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("帧率").font(.appUI(size: 12)).foregroundStyle(EditorTheme.secondaryText)
             EditorSegmentedControl(
                 options: OutputFrameRate.exportProductChoices,
                 title: { $0.label },
@@ -529,7 +566,8 @@ struct ExportSheet: View {
                         Spacer()
                         Text("\(Int((progress * 100).rounded()))%")
                             .font(.system(.caption, design: .monospaced).weight(.semibold))
-                            .foregroundStyle(EditorTheme.platinumAccent)
+                            .foregroundStyle(EditorTheme.primaryText)
+                            .contentTransition(.numericText())
                     }
 
                     GeometryReader { proxy in
@@ -538,13 +576,7 @@ struct ExportSheet: View {
                                 .fill(EditorTheme.controlWell)
 
                             Capsule(style: .continuous)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [EditorTheme.selectionTint, EditorTheme.selectionTint],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
+                                .fill(EditorTheme.platinumAccent)
                                 .frame(
                                     width: progress > 0
                                         ? max(proxy.size.width * CGFloat(progress), 8)
@@ -564,7 +596,7 @@ struct ExportSheet: View {
                     .foregroundStyle(EditorTheme.secondaryText)
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("导出进度")
+                .accessibilityLabel(appLocalized("导出进度"))
                 .accessibilityValue("\(Int((progress * 100).rounded()))%")
             } else if mediaSession.prepared == nil {
                 HStack(alignment: .top, spacing: 8) {
@@ -575,21 +607,21 @@ struct ExportSheet: View {
                             .foregroundStyle(.orange)
                     }
                     Text(mediaSession.errorMessage ?? appLocalized("正在准备与预览同一代的导出素材…"))
-                        .font(.appUI(.caption))
+                        .font(.appUI(size: 11))
                         .foregroundStyle(.secondary)
                 }
             } else {
                 Label { Text("已准备好导出") } icon: { AppLineIcon(kind: .checkCircle, size: 16) }
-                    .font(.appUI(.caption))
+                    .font(.appUI(size: 11))
                     .foregroundStyle(.secondary)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("导出状态")
-                    .accessibilityValue("已准备好导出")
+                    .accessibilityLabel(appLocalized("导出状态"))
+                    .accessibilityValue(appLocalized("已准备好导出"))
             }
 
             if let message = exporter.errorMessage ?? requestErrorMessage {
                 Text(message)
-                    .font(.appUI(.caption))
+                    .font(.appUI(size: 11))
                     .foregroundStyle(.red)
                     .lineLimit(2)
             }
@@ -598,11 +630,10 @@ struct ExportSheet: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(EditorTheme.chrome(0.045))
+            RoundedRectangle(cornerRadius: EditorInterfaceRadius.tile, style: .continuous)
+                .fill(EditorTheme.cardFill)
         )
-
-        .animation(RecorderMotion.fade, value: exporter.isExporting)
+        .animation(SpringMotion.hover, value: exporter.isExporting)
     }
 
     private var disabledExportReason: String? {
@@ -706,13 +737,13 @@ struct ExportSheet: View {
         requestErrorMessage = nil
         _ = editorStore.prepareForExternalAction(.export)
         guard let preparedMedia = mediaSession.prepared else {
-            requestErrorMessage = mediaSession.errorMessage ?? "导出素材尚未准备完成。"
+            requestErrorMessage = mediaSession.errorMessage ?? appLocalized("导出素材尚未准备完成。")
             return
         }
         do {
             let project = editorStore.project
             guard let outputURL = selectedOutputURL else {
-                requestErrorMessage = "请先选择导出保存位置。"
+                requestErrorMessage = appLocalized("请先选择导出保存位置。")
                 return
             }
             let request = try EditorExportRequestBuilder.make(
@@ -743,6 +774,13 @@ struct ExportSheet: View {
 
     private func prepareSuggestedOutputURLIfNeeded() {
         guard selectedOutputURL == nil else { return }
+        refreshSuggestedOutputURL()
+    }
+
+    private func refreshAutomaticOutputNameIfNeeded() {
+        guard customOutputBaseName == nil,
+              !isEditingOutputName,
+              !exporter.isExporting else { return }
         refreshSuggestedOutputURL()
     }
 
@@ -853,7 +891,7 @@ struct ExportSheet: View {
     private var suggestedProjectName: String {
         exportScope.outputRange == nil
             ? projectDisplayName
-            : "\(projectDisplayName)-选区"
+            : "\(projectDisplayName)-\(appLocalized("选区"))"
     }
 
     private var exportActionTitle: String {
@@ -876,7 +914,7 @@ struct ExportSheet: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("选区导出")
+        .accessibilityLabel(appLocalized("选区导出"))
         .accessibilityValue(
             String(format: appLocalized("%d 个片段，从 %@ 到 %@"),
                    exportScope.selectedSegmentCount, Self.exportTimecode(range.start), Self.exportTimecode(range.end))
@@ -892,10 +930,10 @@ struct ExportSheet: View {
 
     private func resolutionDetail(_ resolution: CanvasResolution) -> String {
         switch resolution {
-        case .source: "跟随素材"
-        case .fullHD: "轻量高清"
-        case .quadHD: "细节优先"
-        case .ultraHD: "超清输出"
+        case .source: appLocalized("跟随素材")
+        case .fullHD: appLocalized("轻量高清")
+        case .quadHD: appLocalized("细节优先")
+        case .ultraHD: appLocalized("超清输出")
         }
     }
 }

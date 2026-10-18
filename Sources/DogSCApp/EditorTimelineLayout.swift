@@ -20,44 +20,18 @@ fileprivate struct EditorTimelineControlButtonStyle: ButtonStyle {
                     in: RoundedRectangle(cornerRadius: 9, style: .continuous)
                 )
                 .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                .scaleEffect(configuration.isPressed && isEnabled && !RecorderMotion.reduces ? 0.96 : 1.0)
+                .scaleEffect(configuration.isPressed && isEnabled && !RecorderMotion.reduces ? 0.93 : 1.0)
                 .onHover { isHovered = $0 }
-                .animation(RecorderMotion.fade, value: isHovered)
-                .animation(RecorderMotion.quick, value: configuration.isPressed)
-                .animation(RecorderMotion.fade, value: isEnabled)
+                .animation(SpringMotion.hover, value: isHovered)
+                .animation(SpringMotion.lift, value: configuration.isPressed)
+                .animation(SpringMotion.hover, value: isEnabled)
         }
 
         private var backgroundColor: Color {
             guard isEnabled else { return .clear }
-            if configuration.isPressed { return EditorTheme.chrome(0.14) }
-            if isHovered { return EditorTheme.chrome(0.08) }
+            if configuration.isPressed { return EditorTheme.chrome(0.12) }
+            if isHovered { return EditorTheme.chrome(0.065) }
             return .clear
-        }
-    }
-}
-
-/// Playback buttons are centred on the workspace; the clock follows them on
-/// the right. Compact windows shift the group just enough to keep tools clear.
-fileprivate struct EditorTimelineControlsLayout: Layout {
-    var compact = false
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        CGSize(width: proposal.width ?? 1080, height: proposal.height ?? 44)
-    }
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        guard subviews.count == 4 else { return }
-        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
-        let edge: CGFloat = compact ? 4 : 18
-        let gap: CGFloat = compact ? 10 : 20
-        let clockGap: CGFloat = compact ? 8 : 16
-        let leadingX = bounds.minX + edge
-        let toolsX = bounds.maxX - edge - sizes[3].width
-        let playX = max(leadingX + sizes[0].width + gap,
-                       min(bounds.midX - sizes[1].width / 2,
-                           toolsX - gap - sizes[1].width - clockGap - sizes[2].width))
-        let positions = [leadingX, playX, playX + sizes[1].width + clockGap, toolsX]
-        for index in 0..<4 {
-            subviews[index].place(at: CGPoint(x: positions[index], y: bounds.midY - sizes[index].height / 2),
-                                  proposal: ProposedViewSize(sizes[index]))
         }
     }
 }
@@ -94,7 +68,8 @@ extension EditorTimelineView {
         tint: Color,
         isFocused: Bool
     ) -> some View {
-        EditorTheme.selectionWash.opacity(isFocused ? 0.18 : 0)
+        // A neutral lift: lane colour is an accent, never a full-row wash.
+        EditorTheme.chrome(isFocused ? 0.025 : 0)
             .allowsHitTesting(false)
             .animation(SpringMotion.interactive, value: isFocused)
     }
@@ -104,7 +79,20 @@ extension EditorTimelineView {
     private func timelineCapsule<Content: View>(
         @ViewBuilder _ content: () -> Content
     ) -> some View {
-        HStack(spacing: layout.compactTimelineControls ? 4 : 8) { content() }.fixedSize(horizontal: true, vertical: false).frame(height: 44)
+        HStack(spacing: 2) { content() }
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(height: 40)
+    }
+
+    /// Active timeline modes (snap, hover preview, restore cuts) share the
+    /// segmented thumb so an engaged mode reads as a raised key, not a tint.
+    @ViewBuilder
+    private func timelineModeSurface(isOn: Bool) -> some View {
+        if isOn {
+            Capsule(style: .continuous)
+                .fill(EditorConsole.Track.primary.soft)
+                .transition(.opacity)
+        }
     }
 
     func timelineControls(duration: TimeInterval) -> some View {
@@ -128,7 +116,7 @@ extension EditorTimelineView {
             }
         )
 
-        return EditorTimelineControlsLayout(compact: layout.isCompact) {
+        return HStack(spacing: 8) {
                 timelineCapsule {
                     Button(action: splitCurrentTimelineSelectionAtPlayhead) {
                         AppLineIcon(kind: .scissors, size: 16)
@@ -162,12 +150,10 @@ extension EditorTimelineView {
                         }
                     } label: {
                         AppLineIcon(kind: .undo, size: 16)
-                            .foregroundStyle(isRestoreCutMode ? editorAccent : Color.secondary)
+                            .foregroundStyle(isRestoreCutMode ? EditorTheme.primaryText : Color.secondary)
                             .frame(width: 30, height: 30)
-                            .background(
-                                isRestoreCutMode ? EditorTheme.chrome(0.10) : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            )
+                            .background { timelineModeSurface(isOn: isRestoreCutMode) }
+                            .animation(SpringMotion.lift, value: isRestoreCutMode)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(EditorTimelineControlButtonStyle())
@@ -183,43 +169,26 @@ extension EditorTimelineView {
                     .accessibilityValue(appLocalized(isRestoreCutMode ? "开关状态 · 开启" : "开关状态 · 关闭"))
                     .accessibilityIdentifier("editor.timeline.primary.restore-mode")
 
-                    Rectangle().fill(EditorTheme.hairline).frame(width: 1, height: 18).padding(.horizontal, 3)
-                    timelineDisplayModePicker
                     recordingMarkerMenu
+
+                    Button {
+                        withAnimation(EditorSwapTiming.layout) {
+                            timelineLabelsCollapsed.toggle()
+                        }
+                    } label: {
+                        EditorSymbol(timelineLabelsCollapsed ? "chevron.right" : "chevron.left", size: 14)
+                            .frame(width: 30, height: 30)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(EditorTimelineControlButtonStyle())
+                    .help(appLocalized(timelineLabelsCollapsed ? "展开轨道名称" : "收起轨道名称"))
+                    .accessibilityLabel(appLocalized(timelineLabelsCollapsed ? "展开轨道名称" : "收起轨道名称"))
                 }
 
+                Spacer(minLength: 12)
+                timelineDisplayModePicker
+                Spacer(minLength: 12)
 
-            HStack(spacing: layout.compactTimelineControls ? 4 : 10) {
-                    Button { stepTimeline(byFrames: -1) } label: {
-                        AppLineIcon(kind: .previousFrame, size: 17)
-                            .frame(width: layout.compactTimelineControls ? 34 : 48, height: layout.compactTimelineControls ? 34 : 42)
-                    }
-                    .buttonStyle(EditorSoftRaisedButtonStyle())
-                    .help("上一帧（←；Shift+← 移动 5 帧）")
-                    .accessibilityLabel("上一帧")
-                    Button { playbackController.togglePlayback() } label: {
-                        AppLineIcon(kind: transportIsPlaying ? .pause : .play, size: 20)
-                            .frame(width: layout.compactTimelineControls ? 38 : 52, height: layout.compactTimelineControls ? 34 : 42)
-                    }
-                    .buttonStyle(EditorSoftRaisedButtonStyle(isPrimary: true))
-                    .disabled(!transportCanPlay)
-                    .help(appLocalized(transportIsPlaying ? "暂停（空格）" : "播放（空格）"))
-                    .accessibilityLabel(appLocalized(transportIsPlaying ? "暂停" : "播放"))
-                    Button { stepTimeline(byFrames: 1) } label: {
-                        AppLineIcon(kind: .nextFrame, size: 17)
-                            .frame(width: layout.compactTimelineControls ? 34 : 48, height: layout.compactTimelineControls ? 34 : 42)
-                    }
-                    .buttonStyle(EditorSoftRaisedButtonStyle())
-                    .help("下一帧（→；Shift+→ 移动 5 帧）")
-                    .accessibilityLabel("下一帧")
-            }
-            HStack(spacing: 5) {
-                    NativePlaybackTimeView(playbackController: playbackController)
-                        .frame(width: 72, height: 30)
-                    Text("/ " + transportTimestamp(duration))
-                        .font(.appUI(size: 13, weight: .regular)).monospacedDigit()
-                        .foregroundStyle(EditorTheme.secondaryText)
-            }
 
             HStack(spacing: layout.compactTimelineControls ? 4 : 10) {
 
@@ -232,11 +201,11 @@ extension EditorTimelineView {
                                 Label { Text(appLocalized(isSnappingEnabled ? "吸附" : "吸附已关")) } icon: { EditorMagnetIcon().frame(width: 13, height: 13) }
                             }
                         }
-                            .font(.appUI(.caption, weight: .medium))
-                            .foregroundStyle(isSnappingEnabled ? editorAccent : Color.secondary)
-                            .padding(.horizontal, 7).frame(height: 30)
-                            .background(isSnappingEnabled ? EditorTheme.chrome(0.10) : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 8))
+                            .font(.appUI(size: 11, weight: .medium))
+                            .foregroundStyle(isSnappingEnabled ? EditorConsole.Track.primary.softInk : Color.secondary)
+                            .padding(.horizontal, 8).frame(height: 30)
+                            .background { timelineModeSurface(isOn: isSnappingEnabled) }
+                            .animation(SpringMotion.lift, value: isSnappingEnabled)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(EditorTimelineControlButtonStyle())
@@ -261,18 +230,16 @@ extension EditorTimelineView {
                                 Label { Text("预览") } icon: { AppLineIcon(kind: isHoverPreviewEnabled ? .eye : .eyeOff, size: 15) }
                             }
                         }
-                        .font(.appUI(.caption, weight: .medium))
+                        .font(.appUI(size: 11, weight: .medium))
                         .foregroundStyle(
                             isHoverPreviewEnabled
-                                ? editorAccent
+                                ? EditorConsole.Track.primary.softInk
                                 : Color.secondary
                         )
-                        .padding(.horizontal, 7)
+                        .padding(.horizontal, 8)
                         .frame(height: 30)
-                        .background(
-                            isHoverPreviewEnabled ? EditorTheme.chrome(0.10) : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        )
+                        .background { timelineModeSurface(isOn: isHoverPreviewEnabled) }
+                        .animation(SpringMotion.lift, value: isHoverPreviewEnabled)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(EditorTimelineControlButtonStyle())
@@ -288,10 +255,27 @@ extension EditorTimelineView {
                     Button {
                         zoomTimeline(to: 1, pointerViewportX: nil)
                     } label: {
-                        AppLineIcon(kind: .fit, size: 15)
-                            .foregroundStyle(timelineZoom > 1.01 ? Color.primary : Color.secondary)
-                            .frame(width: 30, height: 30)
-                            .contentShape(Rectangle())
+                        // Plain words beat a glyph here: "show the whole
+                        // timeline" has no widely understood icon.
+                        Group {
+                            if layout.iconOnlyTimelineControls {
+                                EditorSymbol("arrow.left.and.right", size: 15.5)
+                                    .font(.appUI(size: 12, weight: .medium))
+                            } else {
+                                Label {
+                                    Text("全部")
+                                } icon: {
+                                    EditorSymbol("arrow.left.and.right", size: 14.5)
+                                        .font(.appUI(size: 11, weight: .medium))
+                                }
+                            }
+                        }
+                        .font(.appUI(size: 11, weight: .medium))
+                        .foregroundStyle(timelineZoom > 1.01 ? EditorTheme.primaryText : Color.secondary)
+                        .padding(.horizontal, 8)
+                        .frame(minWidth: 30)
+                        .frame(height: 30)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(EditorTimelineControlButtonStyle())
                     .disabled(timelineZoom <= 1.01)
@@ -329,9 +313,8 @@ extension EditorTimelineView {
                 }
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 10)
         .frame(height: timelineControlsHeight)
-        .background(EditorTheme.panelSurface)
     }
 
     private var transportIsPlaying: Bool {
@@ -347,8 +330,8 @@ extension EditorTimelineView {
             timelineDisplayModeButton("画面", symbol: "film", waveform: false)
             timelineDisplayModeButton("波形", symbol: "waveform", waveform: true)
         }
-        .padding(3).fixedSize()
-        .background(EditorTheme.chrome(0.045), in: RoundedRectangle(cornerRadius: 11))
+        .padding(2).fixedSize()
+        .background(EditorTheme.chrome(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("片段显示方式")
     }
@@ -361,7 +344,7 @@ extension EditorTimelineView {
             if gestureOwnership.activeIntent != nil || editorStore.interaction != nil {
                 cancelActiveTimelineGesture()
             }
-            withAnimation(RecorderMotion.settle) { usesWaveformClips = waveform }
+            withAnimation(SpringMotion.settle) { usesWaveformClips = waveform }
         } label: {
             HStack(spacing: 7) {
                 AppLineIcon(kind: waveform ? .waveform : .film, size: 14)
@@ -373,8 +356,7 @@ extension EditorTimelineView {
                 .contentShape(RoundedRectangle(cornerRadius: 8))
                 .background {
                     if selected {
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(EditorTheme.selectionWash)
+                        EditorRaisedThumb(shape: RoundedRectangle(cornerRadius: 8, style: .continuous))
                             .matchedGeometryEffect(id: "display-mode", in: displayModeSelection)
                     }
                 }
@@ -390,23 +372,27 @@ extension EditorTimelineView {
         VStack(spacing: 0) {
             timelineTrackManager
                 .frame(height: timelineRulerHeight)
+                .timelineRowDivider(strong: true)
             VStack(spacing: 0) {
-                timelineLabel("屏幕录制", symbol: usesWaveformClips ? "waveform" : "display", tint: EditorTheme.platinumMuted,
+                timelineLabel("屏幕录制", symbol: usesWaveformClips ? "waveform" : "display", tint: EditorConsole.Track.primary.stroke,
                     height: primaryVideoHeight + 12, isFocused: focusedTimelineLane == .primary)
             }
+            .timelineRowDivider()
             if showsCameraSyncTimeline {
                 timelineLabel(
                     "摄像同步",
                     symbol: "waveform.path.ecg",
-                    tint: editorCameraSyncClip,
+                    tint: EditorConsole.Track.cameraSync.stroke,
                     height: cameraSyncTimelineHeight,
                     isFocused: focusedTimelineLane == .cameraSync
                 )
+                .timelineRowDivider()
+                .transition(.timelineLane)
             }
             if showsZoomTimeline {
                 optionalTimelineLabel(
                     "缩放",
-                    tint: editorZoomClip,
+                    tint: EditorConsole.Track.zoom.stroke,
                     height: zoomTimelineHeight,
                     track: .zoom
                 )
@@ -414,7 +400,7 @@ extension EditorTimelineView {
             if showsScreenMotionTimeline {
                 optionalTimelineLabel(
                     "屏幕 3D",
-                    tint: motionTrackColor(.screen),
+                    tint: EditorConsole.Track.screenMotion.stroke,
                     height: motionTimelineHeight,
                     track: .screenMotion
                 )
@@ -422,7 +408,7 @@ extension EditorTimelineView {
             if showsCameraMotionTimeline {
                 optionalTimelineLabel(
                     "摄像运动",
-                    tint: motionTrackColor(.camera),
+                    tint: EditorConsole.Track.cameraMotion.stroke,
                     height: motionTimelineHeight,
                     track: .cameraMotion
                 )
@@ -430,7 +416,7 @@ extension EditorTimelineView {
             if showsOverlayTimeline {
                 optionalTimelineLabel(
                     "叠加",
-                    tint: editorOverlayClip,
+                    tint: EditorConsole.Track.overlay.stroke,
                     height: overlayTimelineHeight,
                     track: .overlays
                 )
@@ -446,8 +432,9 @@ extension EditorTimelineView {
         height: CGFloat,
         isFocused: Bool
     ) -> some View {
-        EditorTimelineLaneLabel(title: title, symbol: symbol,
-                                horizontalInset: layout.value(regular: 16, compact: 6))
+        EditorTimelineLaneLabel(title: title, symbol: symbol, tint: tint,
+                                horizontalInset: layout.value(regular: 12, compact: 6),
+                                collapsed: timelineLabelsCollapsed)
             .frame(height: height)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(String(format: appLocalized("%@轨道"), appLocalized(title)))
@@ -464,14 +451,21 @@ extension EditorTimelineView {
                 }
             VStack(spacing: 0) {
                 timelineRuler(width: width, duration: duration, cutX: cutX)
+                    .timelineRowDivider(strong: true)
                 mainClipTimeline(width: width, duration: duration)
+                    .editorTimelineEdits()
+                    .timelineRowDivider()
                 if showsCameraSyncTimeline {
                     cameraSyncTimeline(width: width, duration: duration)
-                        .transition(.opacity.combined(with: .offset(y: 8)))
+                        .editorTimelineEdits()
+                        .timelineRowDivider()
+                        .transition(.timelineLane)
                 }
                 if showsZoomTimeline {
                     zoomTimeline(width: width, duration: duration)
-                        .transition(.opacity.combined(with: .offset(y: 8)))
+                        .editorTimelineEdits()
+                        .timelineRowDivider()
+                        .transition(.timelineLane)
                 }
                 if showsScreenMotionTimeline {
                     motionTimeline(
@@ -480,7 +474,9 @@ extension EditorTimelineView {
                         width: width,
                         duration: duration
                     )
-                    .transition(.opacity.combined(with: .offset(y: 8)))
+                    .editorTimelineEdits()
+                    .timelineRowDivider()
+                    .transition(.timelineLane)
                 }
                 if showsCameraMotionTimeline {
                     motionTimeline(
@@ -489,11 +485,14 @@ extension EditorTimelineView {
                         width: width,
                         duration: duration
                     )
-                    .transition(.opacity.combined(with: .offset(y: 8)))
+                    .editorTimelineEdits()
+                    .timelineRowDivider()
+                    .transition(.timelineLane)
                 }
                 if showsOverlayTimeline {
                     combinedOverlayTimeline(width: width, duration: duration)
-                        .transition(.opacity.combined(with: .offset(y: 8)))
+                        .editorTimelineEdits()
+                        .transition(.timelineLane)
                 }
             }
 
@@ -512,7 +511,7 @@ extension EditorTimelineView {
             // only its non-interactive guide enters the primary clip.
             if let cutX {
                 Rectangle()
-                    .fill(EditorTheme.chrome(0.85))
+                    .fill(EditorConsole.Track.primary.stroke)
                     .frame(width: 1, height: primaryTimelineHeight)
                     .offset(x: cutX - 0.5, y: timelineRulerHeight)
                     .allowsHitTesting(false)
@@ -585,53 +584,11 @@ extension EditorTimelineView {
             // The ruler is a small, viewport-bounded drawing. Rendering it in
             // the current display pass avoids the blank asynchronous frame
             // that used to appear while its size changed during zoom.
-            Canvas(opaque: false, rendersAsynchronously: false) { context, size in
-                let safeDuration = max(duration, 0.001)
-                for layer in scaleLayers where layer.opacity > 0.001 {
-                    let ticks = EditorTimelineRulerPresentation.visibleTicks(
-                        majorStep: layer.majorStep,
-                        duration: duration,
-                        width: width,
-                        visibleRange: preparedRange,
-                        guardBand: 0
-                    )
-                    var majorPath = Path()
-                    var minorPath = Path()
-                    var layerContext = context
-                    layerContext.opacity = layer.opacity
-                    for tick in ticks {
-                        let rawX = width * CGFloat(tick.time / safeDuration) - preparedRange.lowerBound
-                        let x = min(max(rawX, 0), max(size.width - 0.5, 0)) + 0.5
-                        if tick.isMajor {
-                            majorPath.move(to: CGPoint(x: x, y: size.height - 12))
-                            majorPath.addLine(to: CGPoint(x: x, y: size.height - 2))
-                            let labelX = min(max(x + 4, 0), max(size.width - 42, 0))
-                            if layer.majorStep == labelStep {
-                            context.draw(
-                                Text(timelineTimestamp(tick.time))
-                                    .font(.appUI(size: 11)).monospacedDigit()
-                                    .foregroundStyle(.secondary),
-                                at: CGPoint(x: labelX, y: 10),
-                                anchor: .topLeading
-                            )
-                            }
-                        } else {
-                            minorPath.move(to: CGPoint(x: x, y: size.height - 7))
-                            minorPath.addLine(to: CGPoint(x: x, y: size.height - 2))
-                        }
-                    }
-                    layerContext.stroke(
-                        majorPath,
-                        with: .color(EditorTheme.chrome(0.20)),
-                        lineWidth: 1
-                    )
-                    layerContext.stroke(
-                        minorPath,
-                        with: .color(EditorTheme.chrome(0.09)),
-                        lineWidth: 1
-                    )
-                }
-            }
+            EditorRulerTicks(
+                width: width, duration: duration, preparedRange: preparedRange,
+                scaleLayers: scaleLayers, labelStep: labelStep
+            )
+            .equatable()
             .frame(width: max(preparedRange.upperBound - preparedRange.lowerBound, 1), height: timelineRulerHeight)
             .offset(x: preparedRange.lowerBound)
             .allowsHitTesting(false)
@@ -665,10 +622,10 @@ extension EditorTimelineView {
             }
             if let cutX {
                 AppLineIcon(kind: .scissors, size: 16)
-                    .font(.appUI(size: 9, weight: .bold))
-                    .foregroundStyle(EditorTheme.onAccent)
+                    .font(.appUI(size: 10, weight: .bold))
+                    .foregroundStyle(EditorConsole.Track.primary.ink)
                     .frame(width: 18, height: 18)
-                    .background(Circle().fill(editorAccent))
+                    .background(Circle().fill(EditorConsole.Track.primary.fill))
                     .offset(x: cutX - 9, y: timelineRulerHeight - 20)
                     .allowsHitTesting(false)
                     .zIndex(31)
@@ -749,6 +706,7 @@ extension EditorTimelineView {
         let intent = EditorTimelineGestureIntent.scrub
         return DragGesture(minimumDistance: 0)
             .onChanged { value in
+                EditorDragFrameCoalescer.shared.submit {
                 guard beginTimelineGesture(intent) else { return }
                 let rawTime = EditorTimelineMath.clampedTime(
                     atX: Double(value.location.x),
@@ -761,7 +719,9 @@ extension EditorTimelineView {
                 playbackController.beginScrubbing()
                 playbackController.updateScrubbing(to: time)
             }
+}
             .onEnded { _ in
+                EditorDragFrameCoalescer.shared.flush()
                 playbackController.endScrubbing()
                 endTimelineGesture(intent)
             }
@@ -774,8 +734,8 @@ extension EditorTimelineView {
         filmstripPriorityRange: ClosedRange<CGFloat>
     ) -> some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(isPrimaryWaveformSelected(segment.id) ? EditorTheme.selectionWash : EditorTheme.chrome(0.035))
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(EditorConsole.Track.primary.primaryTimelineSurface(emphasis))
             GeometryReader { geometry in
                 let bandHeight = showsClipWaveforms
                     ? geometry.size.height * EditorTimelineClipGeometry.waveformBandFraction : 0
@@ -791,36 +751,61 @@ extension EditorTimelineView {
                         .frame(height: geometry.size.height - bandHeight)
                     if showsClipWaveforms {
                         Rectangle()
-                            .fill(EditorTheme.chrome(0.02))
+                            .fill(Color.clear)
                             .frame(height: bandHeight)
                             .overlay(alignment: .top) {
-                                Rectangle().fill(EditorTheme.chrome(0.08)).frame(height: 0.5)
+                                Rectangle().fill(EditorTheme.chrome(0.10)).frame(height: 0.5)
                             }
                     }
                 }
+                // Film and waveform swap in sequence: the outgoing layer is
+                // gone before the other arrives, so the picture never shows
+                // through the growing waveform.
+                // 画面 → 波形: the frames lift away and soften, then the
+                // sound rises to fill the clip. 波形 → 画面 runs backwards: the
+                // sound sinks into its band and the frames settle down into place.
                 .opacity(usesWaveformClips ? 0 : 1)
+                .offset(y: usesWaveformClips && !RecorderMotion.reduces ? -10 : 0)
+                .blur(radius: usesWaveformClips && !RecorderMotion.reduces ? 3 : 0)
+                .animation(
+                    usesWaveformClips
+                        ? .easeIn(duration: 0.14)
+                        : .spring(response: 0.38, dampingFraction: 0.82).delay(EditorTimelineSwap.inDelay),
+                    value: usesWaveformClips
+                )
+            }
+            if usesWaveformClips && !showsClipWaveforms {
+                // Waveform view of a silent recording: say so instead of
+                // leaving an empty box that looks unfinished.
+                HStack(spacing: 5) {
+                    AppLineIcon(kind: .waveform, size: 12)
+                    Text("没有声音")
+                        .font(.appUI(size: 11, weight: .medium))
+                }
+                .foregroundStyle(EditorTheme.secondaryText)
+                .lineLimit(1)
+                .transition(.opacity)
+                .allowsHitTesting(false)
             }
         }
-            .animation(SpringMotion.fluid, value: usesWaveformClips)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .animation(EditorSwapTiming.crossfade, value: usesWaveformClips)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             .padding(EditorTimelineClipGeometry.contentInset)
-            .background(EditorTheme.cardElevated, in: RoundedRectangle(cornerRadius: 13))
-            .editorTimelineClipChrome(cornerRadius: 13, emphasis: emphasis)
+            .background(EditorTheme.panelRaised, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .editorTimelineClipChrome(cornerRadius: 9, emphasis: emphasis, selectionRing: EditorConsole.Track.primary.stroke)
     }
 
+    /// A small, quiet length tag in the clip's corner: "4.7s" instead of a
+    /// heavy "0:04.69" pill sitting on the picture.
     private func primaryDurationBadge(_ duration: TimeInterval) -> some View {
-        Text(timelineTimestamp(duration))
-            .font(.appUI(size: 11, weight: .medium)).monospacedDigit()
+        Text(timelineClipLength(duration))
+            .font(.appUI(size: 10, weight: .semibold)).monospacedDigit()
             .lineLimit(1)
-            .foregroundStyle(usesWaveformClips ? EditorTheme.chrome(0.72) : .white)
-            .padding(.horizontal, 7).padding(.vertical, 4)
-            .background(usesWaveformClips ? EditorTheme.cardElevated.opacity(0.94) : .black.opacity(0.42), in: Capsule())
-            .animation(SpringMotion.fluid, value: usesWaveformClips)
+            .foregroundStyle(usesWaveformClips ? EditorTheme.secondaryText : .white)
+            .padding(.horizontal, 5).padding(.vertical, 1.5)
+            .background(usesWaveformClips ? EditorTheme.panelRaised : .black.opacity(0.64), in: Capsule())
+            .animation(EditorSwapTiming.crossfade, value: usesWaveformClips)
             .accessibilityHidden(true)
-    }
-
-    private func isPrimaryWaveformSelected(_ id: UUID) -> Bool {
-        selectedPrimarySegmentIDs.contains(id)
     }
 
     func primarySegmentTitle(
@@ -879,13 +864,16 @@ extension EditorTimelineView {
                             coordinateSpace: .named(editorTimelineDocumentCoordinateSpace)
                         )
                         .onChanged { value in
+                EditorDragFrameCoalescer.shared.submit {
                             updatePrimarySegmentDrag(
                                 segmentID: segment.id,
                                 translation: value.translation.width,
                                 documentX: value.location.x, laneWidth: laneWidth, duration: duration
                             )
                         }
+}
                         .onEnded { value in
+                EditorDragFrameCoalescer.shared.flush()
                             finishPrimarySegmentDrag(
                                 segmentID: segment.id,
                                 translation: value.translation.width,
@@ -961,18 +949,12 @@ extension EditorTimelineView {
                 ? primaryFloatingTranslation(width: laneWidth, duration: duration)
                 : 0)
         )
-        .opacity(draggedPrimarySegmentID == segment.id ? 0.82 : 1)
+        .editorClipDragFeedback(draggedPrimarySegmentID == segment.id)
+        .transition(.identity)
         .zIndex(
             draggedPrimarySegmentID == segment.id
                 ? 10
                 : isSelected ? 3 : emphasis == .hovered ? 1 : 0
-        )
-        .shadow(
-            color: draggedPrimarySegmentID == segment.id
-                ? EditorTheme.softShadow
-                : .clear,
-            radius: 8,
-            y: 2
         )
         .help("主片段 \(index + 1) · \(timelineTimestamp(segment.outputDuration)) · ⇧ 连选 · ⌘ 增减选择 · ⌥ 单击切分")
         .accessibilityElement(children: .ignore)
@@ -1024,7 +1006,7 @@ extension EditorTimelineView {
         let visibleSegments = visibleSegmentIndices.map { (index: $0, clip: segments[$0]) }
         return ZStack(alignment: .topLeading) {
             timelineLaneSurface(
-                tint: editorClipAmberTop,
+                tint: EditorConsole.Track.primary.fill,
                 isFocused: focusedTimelineLane == .primary
             )
             Color.clear
@@ -1074,13 +1056,13 @@ extension EditorTimelineView {
             ForEach(visibleSegments, id: \.clip.id) { item in
                 let segment = item.clip
                 let segmentWidth = CGFloat(segment.outputDuration / max(duration, 0.001)) * width
-                if segmentWidth > 82 {
+                if segmentWidth > 64 {
                     primaryDurationBadge(segment.outputDuration)
-                        .frame(width: 76, alignment: .trailing)
+                        .frame(width: 56, alignment: .trailing)
                         .offset(x: CGFloat(segment.outputStart / max(duration, 0.001)) * width
-                            + segmentWidth - 82
+                            + segmentWidth - 64
                             + (draggedPrimarySegmentID == segment.id
-                                ? primaryFloatingTranslation(width: width, duration: duration) : 0), y: 9)
+                                ? primaryFloatingTranslation(width: width, duration: duration) : 0), y: 8)
                         .zIndex(30)
                         .allowsHitTesting(false)
                 }
@@ -1133,7 +1115,7 @@ extension EditorTimelineView {
                 path.addLine(to: CGPoint(x: width, y: baselineY))
             }
             .stroke(
-                editorCameraSyncClip.opacity(0.30),
+                EditorConsole.Track.cameraSync.stroke.opacity(0.30),
                 style: StrokeStyle(lineWidth: 1, dash: [4, 4])
             )
             .allowsHitTesting(false)
@@ -1143,12 +1125,12 @@ extension EditorTimelineView {
                 duration: duration,
                 displayRange: displayRange
             )
-            .stroke(editorCameraSyncClip.opacity(0.92), style: StrokeStyle(lineWidth: 2, lineJoin: .round))
+            .stroke(EditorConsole.Track.cameraSync.stroke, style: StrokeStyle(lineWidth: 2, lineJoin: .round))
             .allowsHitTesting(false)
 
             Text(String(format: appLocalized("基准 %@"), cameraSyncOffsetLabel(cameraSyncBaselineOffset)))
-                .font(.appUI(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundStyle(editorCameraSyncClip.opacity(0.92))
+                .font(.appUI(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(EditorConsole.Track.cameraSync.text)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(EditorTheme.panelRaised.opacity(0.92), in: Capsule())
@@ -1157,7 +1139,7 @@ extension EditorTimelineView {
 
             if cameraSyncAnchors.isEmpty {
                 Text("双击添加同步点 · 单击空白取消选中")
-                    .font(.appUI(size: 9))
+                    .font(.appUI(size: 10))
                     .foregroundStyle(.secondary.opacity(0.8))
                     .offset(x: 104, y: 8)
                     .allowsHitTesting(false)
@@ -1235,7 +1217,7 @@ extension EditorTimelineView {
             if !isSelected {
                 Text(cameraSyncOffsetLabel(cameraSyncBaselineOffset + anchor.offset))
                     .font(.appUI(size: 8, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(editorCameraSyncClip.opacity(0.96))
+                    .foregroundStyle(EditorConsole.Track.cameraSync.text)
                     .frame(width: 70)
                     .offset(x: min(max(x - 35, 0), max(width - 70, 0)), y: 3)
                     .allowsHitTesting(false)
@@ -1246,7 +1228,7 @@ extension EditorTimelineView {
                     .fill(isSelected ? Color.white : editorCameraSyncClip)
                     .overlay {
                         RoundedRectangle(cornerRadius: 2, style: .continuous)
-                            .stroke(Color.black.opacity(0.72), lineWidth: 1)
+                            .stroke(EditorConsole.Track.cameraSync.stroke, lineWidth: isSelected ? 2 : 1)
                     }
                     .frame(width: 11, height: 11)
                     .rotationEffect(.degrees(45))
@@ -1281,17 +1263,17 @@ extension EditorTimelineView {
     func cameraSyncAnchorControls(anchor: MediaSyncAnchor) -> some View {
         HStack(spacing: 3) {
             Text(cameraSyncOffsetLabel(cameraSyncBaselineOffset + anchor.offset))
-                .font(.appUI(size: 9, weight: .bold, design: .monospaced))
-                .foregroundStyle(editorCameraSyncClip)
+                .font(.appUI(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(EditorConsole.Track.cameraSync.text)
             Button { nudgeCameraSyncAnchor(id: anchor.id, by: -cameraSyncAdjustmentStep) } label: {
                 Text("延\(cameraSyncAdjustmentStepMilliseconds)")
-                    .font(.appUI(size: 9.5, weight: .semibold))
+                    .font(.appUI(size: 10, weight: .semibold))
             }
             .buttonStyle(.editorQuiet)
             .help("画面延后 \(cameraSyncAdjustmentStepMilliseconds)ms，并自动试听")
             Button { nudgeCameraSyncAnchor(id: anchor.id, by: cameraSyncAdjustmentStep) } label: {
                 Text("提\(cameraSyncAdjustmentStepMilliseconds)")
-                    .font(.appUI(size: 9.5, weight: .semibold))
+                    .font(.appUI(size: 10, weight: .semibold))
             }
             .buttonStyle(.editorQuiet)
             .help("画面提前 \(cameraSyncAdjustmentStepMilliseconds)ms，并自动试听")
@@ -1323,6 +1305,7 @@ extension EditorTimelineView {
             coordinateSpace: .named(editorTimelineDocumentCoordinateSpace)
         )
         .onChanged { value in
+                EditorDragFrameCoalescer.shared.submit {
             selectedCameraSyncAnchorID = anchor.id
             let origin = cameraSyncAnchorDrag?.original.id == anchor.id
                 ? cameraSyncAnchorDrag?.original ?? anchor
@@ -1340,7 +1323,9 @@ extension EditorTimelineView {
             ), 10)
             cameraSyncAnchorDrag = CameraSyncAnchorDrag(original: origin, draft: draft)
         }
+}
         .onEnded { value in
+                EditorDragFrameCoalescer.shared.flush()
             defer { cameraSyncAnchorDrag = nil }
             guard hypot(value.translation.width, value.translation.height) >= 2,
                   let draft = cameraSyncAnchorDrag?.draft else {
@@ -1426,5 +1411,71 @@ extension EditorTimelineView {
            let outputTime = timelineMap?.outputTime(forSourceTime: anchor.sourceTime) {
             playbackController.scheduleCameraSyncAudition(at: outputTime)
         }
+    }
+}
+
+/// The ruler's ticks and labels as an Equatable value view: only a zoom,
+/// scroll or length change redraws it, never a clip drag.
+struct EditorRulerTicks: View, Equatable {
+    let width: CGFloat
+    let duration: TimeInterval
+    let preparedRange: ClosedRange<CGFloat>
+    let scaleLayers: [EditorTimelineRulerScaleLayer]
+    let labelStep: TimeInterval?
+
+    var body: some View {
+        // The ruler is a small, viewport-bounded drawing. Rendering it in
+        // the current display pass avoids the blank asynchronous frame
+        // that used to appear while its size changed during zoom.
+        Canvas(opaque: false, rendersAsynchronously: false) { context, size in
+            let safeDuration = max(duration, 0.001)
+            for layer in scaleLayers where layer.opacity > 0.001 {
+                let ticks = EditorTimelineRulerPresentation.visibleTicks(
+                    majorStep: layer.majorStep,
+                    duration: duration,
+                    width: width,
+                    visibleRange: preparedRange,
+                    guardBand: 0
+                )
+                var majorPath = Path()
+                var minorPath = Path()
+                var layerContext = context
+                layerContext.opacity = layer.opacity
+                for tick in ticks {
+                    let rawX = width * CGFloat(tick.time / safeDuration) - preparedRange.lowerBound
+                    let x = min(max(rawX, 0), max(size.width - 0.5, 0)) + 0.5
+                    if tick.isMajor {
+                        majorPath.move(to: CGPoint(x: x, y: size.height - 12))
+                        majorPath.addLine(to: CGPoint(x: x, y: size.height - 2))
+                        let labelX = min(max(x + 4, 0), max(size.width - 42, 0))
+                        if layer.majorStep == labelStep {
+                            context.draw(
+                                Text(Self.label(tick.time))
+                                    .font(.appUI(size: 10, weight: .medium)).monospacedDigit()
+                                    .foregroundStyle(EditorTheme.tertiaryText),
+                                at: CGPoint(x: labelX, y: 10),
+                                anchor: .topLeading
+                            )
+                        }
+                    } else {
+                        minorPath.move(to: CGPoint(x: x, y: size.height - 7))
+                        minorPath.addLine(to: CGPoint(x: x, y: size.height - 2))
+                    }
+                }
+                layerContext.stroke(majorPath, with: .color(EditorTheme.chrome(0.20)), lineWidth: 1)
+                layerContext.stroke(minorPath, with: .color(EditorTheme.chrome(0.09)), lineWidth: 1)
+            }
+        }
+    }
+
+    /// Ruler marks drop zero hundredths: "0:18", but "0:18.50".
+    static func label(_ time: TimeInterval) -> String {
+        let centiseconds = max(Int((time * 100).rounded()), 0)
+        let minutes = centiseconds / 6_000
+        let seconds = (centiseconds / 100) % 60
+        let fraction = centiseconds % 100
+        return fraction == 0
+            ? String(format: "%d:%02d", minutes, seconds)
+            : String(format: "%d:%02d.%02d", minutes, seconds, fraction)
     }
 }

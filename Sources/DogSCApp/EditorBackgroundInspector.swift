@@ -11,10 +11,13 @@ struct EditorBackgroundInspector: View {
     let onError: (String) -> Void
     var usesCompactLayout = false
 
+    @Environment(\.consolePalette) private var palette
     @State private var selectedBackgroundTab: BackgroundPanelTab = .wallpaper
+    @State private var backgroundSwapEdge: Edge = .trailing
     @State private var selectedSystemAssetID: String?
     @State private var selectedSystemVariantByGroup: [String: String] = [:]
     @State private var systemImageGroupLimit = 12
+    @State private var showsFullWallpaperGrid = false
     @State private var systemVideoGroupLimit = 12
 
     var body: some View {
@@ -24,7 +27,12 @@ struct EditorBackgroundInspector: View {
                 // 页签切换只浏览候选；真正选择资源或调整颜色时才写入项目。
                 backgroundSourceNavigation
 
-                Group {
+                // Layered, not stacked: the outgoing grid fades under the
+                // incoming one instead of pushing the column taller.
+                ZStack(alignment: .topLeading) {
+                // One VStack per page: the wallpaper page is several sibling
+                // views and must never be layered on top of each other.
+                VStack(alignment: .leading, spacing: EditorInterfaceSpacing.controlGap) {
                 switch selectedBackgroundTab {
                 case .wallpaper:
                     wallpaperLibraryGrid
@@ -35,21 +43,18 @@ struct EditorBackgroundInspector: View {
                 case .image:
                     VStack(alignment: .leading, spacing: 8) {
                         Button(action: chooseWallpaper) {
-                            Label("选择图片或视频…", systemImage: "photo.badge.plus")
+                            EditorSymbolLabel("选择图片或视频…", systemImage: "photo.badge.plus")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.editorQuiet)
-                        Text("支持静态图片和 MOV/MP4 动态背景；视频会循环播放并参与导出。")
-                            .font(.appUI(.caption2))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 }
                 .id(selectedBackgroundTab)
-                .transition(.opacity.combined(with: .offset(y: 8)))
+                .transition(.editorSubpage(edge: backgroundSwapEdge))
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
             }
-            .animation(SpringMotion.fluid, value: selectedBackgroundTab)
             .onAppear {
                 synchronizeBackgroundNavigation(
                     with: editorStore.project.canvas.backgroundSource
@@ -66,7 +71,17 @@ struct EditorBackgroundInspector: View {
                 options: BackgroundPanelTab.allCases,
                 title: { $0.localizedLabel },
                 icon: { $0.icon },
-                selection: $selectedBackgroundTab
+                selection: Binding(
+                    get: { selectedBackgroundTab },
+                    set: { next in
+                        // Same swap as the frame sub-pages above: content
+                        // arrives from the side of the chosen source.
+                        backgroundSwapEdge = editorSwapEdge(
+                            from: selectedBackgroundTab, to: next, in: BackgroundPanelTab.allCases
+                        )
+                        selectedBackgroundTab = next
+                    }
+                )
             )
             if usesCompactLayout, selectedBackgroundTab == .wallpaper {
                 wallpaperReloadButton
@@ -79,7 +94,7 @@ struct EditorBackgroundInspector: View {
             Task { await systemWallpaperCatalog.refresh() }
         } label: {
             ZStack {
-                Image(systemName: "arrow.clockwise")
+                EditorSymbol("arrow.clockwise", size: 14)
                     .opacity(usesCompactLayout && systemWallpaperCatalog.isLoading ? 0 : 1)
                 if usesCompactLayout, systemWallpaperCatalog.isLoading {
                     ProgressView().controlSize(.mini)
@@ -125,13 +140,22 @@ struct EditorBackgroundInspector: View {
         let current = systemWallpaperCatalog.currentDesktopGroup
         let images = Array(systemWallpaperCatalog.imageGroups.prefix(systemImageGroupLimit))
         let groups = (current.map { [$0] } ?? []) + images.filter { $0.id != current?.id }
-        systemGroupGrid(groups)
+        wallpaperAccordion(groups)
         if let issue = systemWallpaperCatalog.currentDesktopIssue, current == nil {
             Text(issue).font(.appUI(size: 11)).foregroundStyle(.secondary)
         }
-        if systemWallpaperCatalog.imageGroups.count > systemImageGroupLimit {
-            Button("显示更多壁纸") { systemImageGroupLimit += 16 }
-                .buttonStyle(.editorGhost)
+        Button(showsFullWallpaperGrid ? "收起全部壁纸" : "查看全部壁纸") {
+            withAnimation(SpringMotion.settle) { showsFullWallpaperGrid.toggle() }
+        }
+        .buttonStyle(.editorGhost)
+        .appButtonKeyboardFocus(in: Capsule(style: .continuous))
+        if showsFullWallpaperGrid {
+            systemGroupGrid(groups)
+                .transition(.editorSwap(edge: .top))
+            if systemWallpaperCatalog.imageGroups.count > systemImageGroupLimit {
+                Button("显示更多壁纸") { systemImageGroupLimit += 16 }
+                    .buttonStyle(.editorGhost)
+            }
         }
         if !systemWallpaperCatalog.videoGroups.isEmpty {
             Text("动态壁纸").font(.appUI(size: 11)).foregroundStyle(.secondary)
@@ -141,6 +165,25 @@ struct EditorBackgroundInspector: View {
                     .buttonStyle(.editorGhost)
             }
         }
+    }
+
+    /// A short strip of the first wallpapers (always including the chosen
+    /// one); the full browser stays one click away beneath it.
+    func wallpaperAccordion(_ groups: [SystemWallpaperGroup]) -> some View {
+        let selected = groups.first { group in group.assets.contains { $0.id == selectedSystemAssetID } }
+        var strip = Array(groups.prefix(8))
+        if let selected, !strip.contains(where: { $0.id == selected.id }), !strip.isEmpty {
+            strip[strip.count - 1] = selected
+        }
+        return EditorWallpaperAccordion(
+            groups: strip,
+            selectedGroupID: selected?.id,
+            asset: { preferredAsset(for: $0) },
+            title: { $0.isCurrentDesktop ? appLocalized("当前桌面") : localizedSystemWallpaperLabel($0.name) },
+            onSelect: { group in
+                if let asset = preferredAsset(for: group) { selectSystemAsset(asset, in: group) }
+            }
+        )
     }
 
     func systemGroupGrid(_ groups: [SystemWallpaperGroup]) -> some View {
@@ -166,7 +209,7 @@ struct EditorBackgroundInspector: View {
                         }
                         .overlay(alignment: .topTrailing) {
                             if isSelected {
-                                Image(systemName: "checkmark")
+                                EditorSymbol("checkmark", size: 10.5)
                                     .font(.appUI(size: 8, weight: .semibold))
                                     // The white media badge needs dark ink in both workspace themes.
                                     .foregroundStyle(.black.opacity(0.84))
@@ -175,7 +218,7 @@ struct EditorBackgroundInspector: View {
                         }
                         .overlay(alignment: .bottomLeading) {
                             if asset.isVideo {
-                                Image(systemName: "play.fill").font(.appUI(size: 8))
+                                EditorSymbol("play.fill", size: 10.5).font(.appUI(size: 8))
                                     .foregroundStyle(.white).padding(5)
                                     .background(.black.opacity(0.4), in: Circle()).padding(5)
                             }
@@ -194,7 +237,7 @@ struct EditorBackgroundInspector: View {
                     }) {
                         HStack(spacing: 3) {
                             Text(displayName).lineLimit(1).truncationMode(.middle)
-                            Image(systemName: "chevron.down").font(.appUI(size: 8))
+                            EditorSymbol("chevron.down", size: 10.5).font(.appUI(size: 8))
                         }.font(.appUI(size: 11)).foregroundStyle(EditorTheme.chrome(0.65))
                             .frame(maxWidth: .infinity).frame(height: 20)
                     }
@@ -320,6 +363,8 @@ struct EditorBackgroundInspector: View {
                             .overlay(alignment: .bottomLeading) {
                                 Text(appLocalized(preset.rawValue))
                                     .font(.appUI(size: 11, weight: .medium))
+                                    .lineLimit(2)
+                                    .minimumScaleFactor(0.7)
                                     .foregroundStyle(.white)
                                     .padding(.horizontal, 8).padding(.vertical, 5)
                                     .background(.black.opacity(0.55), in: Capsule())
@@ -328,7 +373,7 @@ struct EditorBackgroundInspector: View {
                             .overlay(
                                 RoundedRectangle(cornerRadius: 9)
                                     .stroke(
-                                        isSelected ? editorAccent : EditorTheme.chrome(0.12),
+                                        isSelected ? EditorTheme.selectionTint : EditorTheme.chrome(0.12),
                                         lineWidth: isSelected ? 2 : 1
                                     )
                             )
@@ -375,7 +420,7 @@ struct EditorBackgroundInspector: View {
                             .overlay(
                                 RoundedRectangle(cornerRadius: 9)
                                     .stroke(
-                                        isSelected ? editorAccent : EditorTheme.chrome(0.12),
+                                        isSelected ? EditorTheme.selectionTint : EditorTheme.chrome(0.12),
                                         lineWidth: isSelected ? 2 : 1
                                     )
                             )

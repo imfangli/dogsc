@@ -36,7 +36,7 @@ final class RecordingCompletionWindowController {
         let previewHeight = min((width - 16) * 9 / 16, max(48, visible.height - 350))
         let window = RecordingCompletionPanel(contentRect: .zero,
             styleMask: [.borderless], backing: .buffered, defer: false)
-        window.title = appLocalized("录制完成")
+        appLocalizeWindowTitle(window, "录制完成")
         window.identifier = NSUserInterfaceItemIdentifier("dogsc.recording-completion")
         window.isOpaque = false
         window.backgroundColor = .clear
@@ -364,8 +364,9 @@ private struct RecordingCompletionCard: View {
                         .accessibilityLabel("预览暂不可用")
                 }
             }
-            .frame(height: previewHeight)
-            .frame(maxWidth: .infinity)
+            // A wide window thumbnail must not enlarge the stack's reported
+            // width and shift every row outside the native card's viewport.
+            .frame(width: width - RecordingCompletionLayout.inset * 2, height: previewHeight)
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("录制画面预览")

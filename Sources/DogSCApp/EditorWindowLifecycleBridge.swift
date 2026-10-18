@@ -65,6 +65,10 @@ final class WindowObservationView: NSView {
         guard let window else { return }
         updateWindowTitle()
         let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: .appLanguageDidChange,
+            object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateWindowTitle() }
+            })
         observers.append(center.addObserver(forName: NSWindow.didResignKeyNotification,
             object: window, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.onResignKey() }
@@ -90,8 +94,46 @@ final class WindowObservationView: NSView {
             object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.updateScreenSize() }
             })
+        for name in [NSWindow.didResizeNotification, NSWindow.didEndLiveResizeNotification,
+                     NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification,
+                     NSWindow.didExitFullScreenNotification, NSWindow.didChangeBackingPropertiesNotification] {
+            observers.append(center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.alignTrafficLights() }
+            })
+        }
         updateScreenSize()
         updateActivity()
+        DispatchQueue.main.async { [weak self] in self?.alignTrafficLights() }
+    }
+
+    override func layout() {
+        super.layout()
+        alignTrafficLights()
+    }
+
+    /// The editor draws its own 46 pt title bar. Grow the native title-bar
+    /// strip to the same height and centre the traffic lights in it, so the
+    /// window controls sit on the bar's midline like every other control.
+    private func alignTrafficLights() {
+        guard let window, !window.styleMask.contains(.fullScreen),
+              let close = window.standardWindowButton(.closeButton),
+              let titlebarView = close.superview,
+              let container = titlebarView.superview else { return }
+        let barHeight = EditorChromeMetrics.titleBarHeight
+        let windowHeight = window.frame.height
+        let containerFrame = NSRect(x: 0, y: windowHeight - barHeight,
+                                    width: window.frame.width, height: barHeight)
+        if container.frame != containerFrame { container.frame = containerFrame }
+        if titlebarView.frame != container.bounds { titlebarView.frame = container.bounds }
+        let types: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+        for (index, type) in types.enumerated() {
+            guard let button = window.standardWindowButton(type) else { continue }
+            let origin = NSPoint(
+                x: 16 + CGFloat(index) * 20,
+                y: ((barHeight - button.frame.height) / 2).rounded()
+            )
+            if button.frame.origin != origin { button.setFrameOrigin(origin) }
+        }
     }
 
     private func updateScreenSize() {
@@ -119,7 +161,7 @@ final class WindowObservationView: NSView {
         guard let window else { return }
         let trimmed = projectTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         window.title = trimmed.isEmpty
-            ? "\(AppIdentity.displayName) 编辑器"
+            ? "\(AppIdentity.displayName) \(appLocalized("编辑器"))"
             : "\(trimmed) — \(AppIdentity.displayName)"
     }
 

@@ -11,7 +11,7 @@ struct EditorActionMenu<Label: View>: View {
     var body: some View {
         Button { isPresented.toggle() } label: { label() }
             .buttonStyle(.editorToolbarPress)
-            .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .appButtonKeyboardFocus(in: Capsule(style: .continuous))
             .focusEffectDisabled()
             .help(appLocalized(title))
             .accessibilityLabel(appLocalized(title))
@@ -19,16 +19,18 @@ struct EditorActionMenu<Label: View>: View {
             .editorPopover(isPresented: $isPresented, arrowEdge: .bottom) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(appLocalized(title))
-                        .font(.appUI(size: 13, weight: .semibold))
-                        .foregroundStyle(EditorTheme.chrome(0.82))
+                        .font(EditorTypography.eyebrow)
+                        .tracking(0.5)
+                        .foregroundStyle(EditorTheme.popoverSecondaryText)
                         .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
+                        .padding(.top, 6)
+                        .padding(.bottom, 4)
                     ScrollView {
                         VStack(spacing: 4) {
                     ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                         switch item.kind {
                         case .separator:
-                            Divider().padding(.horizontal, 10).padding(.vertical, 5)
+                            Color.clear.frame(height: 6)
                         case .info:
                             Text(item.title).font(.appUI(size: 12)).foregroundStyle(EditorTheme.popoverSecondaryText)
                                 .padding(10)
@@ -38,8 +40,10 @@ struct EditorActionMenu<Label: View>: View {
                             } label: {
                                 HStack(spacing: 12) {
                                     if let symbol = item.systemImage {
-                                        Image(systemName: symbol).font(.system(size: 16))
-                                            .frame(width: 22).accessibilityHidden(true)
+                                        EditorSymbol(symbol, size: 15)
+                                            .frame(width: 30, height: 30)
+                                            .background(EditorTheme.chrome(0.06), in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous))
+                                            .accessibilityHidden(true)
                                     }
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(item.title).font(.appUI(size: 13)).lineLimit(1).truncationMode(.middle)
@@ -51,7 +55,7 @@ struct EditorActionMenu<Label: View>: View {
                                         }
                                     }
                                     Spacer(minLength: 12)
-                                    Image(systemName: "checkmark")
+                                    EditorSymbol("checkmark", size: 15.5)
                                         .font(.appUI(size: 12, weight: .medium))
                                         .foregroundStyle(EditorTheme.selectionTint)
                                         .opacity(item.isOn ? 1 : 0)
@@ -60,7 +64,7 @@ struct EditorActionMenu<Label: View>: View {
                                 .padding(.horizontal, 12).frame(minHeight: item.detail == nil ? 36 : 52)
                             }
                             .buttonStyle(EditorActionRowStyle(selected: item.isOn))
-                            .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: 8))
+                            .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.control))
                             .disabled(!item.isEnabled)
                             .accessibilityLabel(appLocalized(item.title))
                             .accessibilityAddTraits(item.isOn ? .isSelected : [])
@@ -131,13 +135,22 @@ struct EditorActionRowStyle: ButtonStyle {
         @Environment(\.isEnabled) private var isEnabled
         @State private var hovered = false
         var body: some View {
+            let lit = isEnabled && hovered
             configuration.label
-                .foregroundStyle(EditorTheme.chrome(isEnabled ? 0.88 : 0.32))
+                .foregroundStyle(EditorTheme.chrome(isEnabled ? (lit ? 0.96 : 0.86) : 0.32))
+                .offset(x: lit && !RecorderMotion.reduces ? 2 : 0)
                 .frame(maxWidth: .infinity)
-                .background(EditorTheme.chrome(isEnabled && configuration.isPressed ? 0.13 : isEnabled && hovered ? 0.085 : selected ? 0.045 : 0),
-                            in: RoundedRectangle(cornerRadius: 8))
-                .contentShape(RoundedRectangle(cornerRadius: 8))
-                .appKeyboardFocus(in: RoundedRectangle(cornerRadius: 8))
+                .background {
+                    RoundedRectangle(cornerRadius: EditorInterfaceRadius.control, style: .continuous)
+                        .fill(EditorTheme.chrome(isEnabled && configuration.isPressed ? EditorStateWash.pressed : lit ? EditorStateWash.hover : selected ? 0.045 : 0))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: EditorInterfaceRadius.control, style: .continuous)
+                                .strokeBorder(EditorTheme.chrome(lit ? 0.06 : 0), lineWidth: 0.5)
+                        }
+                }
+                .contentShape(RoundedRectangle(cornerRadius: EditorInterfaceRadius.control))
+                .appKeyboardFocus(in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.control))
+                .scaleEffect(isEnabled && configuration.isPressed && !RecorderMotion.reduces ? 0.985 : 1)
                 .onHover { hovered = $0 }
                 .animation(SpringMotion.interactive, value: hovered)
                 .animation(SpringMotion.snappy, value: configuration.isPressed)

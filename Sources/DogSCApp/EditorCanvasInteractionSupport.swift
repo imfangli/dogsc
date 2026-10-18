@@ -16,6 +16,9 @@ enum CanvasObjectInteractionPhase: Int, Equatable {
 
 struct CanvasObjectInteractionChrome {
     let phase: CanvasObjectInteractionPhase
+    /// The selected object's identity colour: the screen, the camera and the
+    /// overlays each outline in their own hue instead of the default ink.
+    var color: Color = EditorTheme.platinumAccent
 
     var showsOutline: Bool { phase != .idle }
 
@@ -24,13 +27,13 @@ struct CanvasObjectInteractionChrome {
         case .idle:
             return .clear
         case .hovered:
-            return EditorTheme.platinumAccent.opacity(0.028)
+            return color.opacity(0.028)
         case .selected:
-            return EditorTheme.platinumAccent.opacity(0.018)
+            return color.opacity(0.018)
         case .selectedHovered:
-            return EditorTheme.platinumAccent.opacity(0.036)
+            return color.opacity(0.036)
         case .editing:
-            return EditorTheme.platinumAccent.opacity(0.052)
+            return color.opacity(0.052)
         }
     }
 
@@ -39,13 +42,13 @@ struct CanvasObjectInteractionChrome {
         case .idle:
             return .clear
         case .hovered:
-            return EditorTheme.platinumAccent.opacity(0.48)
+            return color.opacity(0.48)
         case .selected:
-            return EditorTheme.platinumAccent.opacity(0.88)
+            return color.opacity(0.88)
         case .selectedHovered:
-            return EditorTheme.platinumAccent.opacity(0.96)
+            return color.opacity(0.96)
         case .editing:
-            return EditorTheme.platinumAccent
+            return color
         }
     }
 
@@ -59,14 +62,17 @@ struct CanvasObjectInteractionChrome {
         }
     }
 
+    /// A dark halo rather than a tinted glow: the identity colour is the
+    /// outline itself, and the halo keeps it readable on a wallpaper of the
+    /// same hue (a blue frame outline on a blue wallpaper).
     var glowColor: Color {
         switch phase {
         case .editing:
-            return EditorTheme.platinumAccent.opacity(0.28)
+            return Color.black.opacity(0.40)
         case .selected:
-            return EditorTheme.platinumAccent.opacity(0.10)
+            return Color.black.opacity(0.28)
         case .selectedHovered:
-            return EditorTheme.platinumAccent.opacity(0.18)
+            return Color.black.opacity(0.34)
         case .idle, .hovered:
             return .clear
         }
@@ -152,7 +158,7 @@ extension CanvasPreview {
         } else {
             phase = .idle
         }
-        return CanvasObjectInteractionChrome(phase: phase)
+        return CanvasObjectInteractionChrome(phase: phase, color: EditorConsole.palette(for: selection).fill)
     }
 
     func updateCanvasHover(_ selection: EditorSelection, hovering: Bool) {

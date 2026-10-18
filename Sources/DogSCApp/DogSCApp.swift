@@ -20,6 +20,8 @@ private final class EditorFirstMouseHostingView<Content: View>: NSHostingView<Co
 enum DogSCApplication {
     @MainActor
     static func main() {
+        // Resolve the saved language before constructing any presentation.
+        _ = AppLanguageSettings.shared
         // SceneBuilder cannot conditionally apply newer scene modifiers.
         // Choose the host before creating the one application delegate.
         if #available(macOS 15.0, *) {
@@ -61,7 +63,7 @@ private struct DogSCSettingsScene: Scene {
         Settings { AppSettingsView() }
         .commands {
             CommandGroup(replacing: .appSettings) {
-                Button("设置…") {
+                Button(appLocalized("设置…")) {
                     AppSettingsWindowController.shared.show()
                 }
                 .keyboardShortcut(",", modifiers: .command)
@@ -69,17 +71,18 @@ private struct DogSCSettingsScene: Scene {
             // Declare this with the scene so SwiftUI retains it when rebuilding
             // the application menu for a different AppKit key window.
             CommandGroup(after: .appSettings) {
-                Button("首次使用引导…") {
+                Button(appLocalized("首次使用引导…")) {
                     WindowCoordinator.showFirstLaunchGuide()
                 }
                 .disabled(!guideAccess.isAvailable)
             }
             CommandGroup(after: .toolbar) {
-                Button("快捷键速查") {
+                Button(appLocalized("快捷键速查")) {
                     EditorMenuBridge.shared.shortcutCheatsheetRequest.send()
                 }
             }
         }
+        .environment(\.locale, AppLocalization.shared.locale)
     }
 
 }
@@ -91,21 +94,18 @@ final class FirstLaunchGuideAccess: ObservableObject {
     @Published var isAvailable = false
 }
 
-/// Phase-pinned content hosted by `RecorderPanelController`. The controller
-/// swaps this root in the same non-animated transaction that changes panel size,
-/// so SwiftUI never negotiates an intermediate recorder width.
-/// One island for the whole take. The window is a fixed transparent canvas;
-/// a single solid shape inside it stretches to fit whatever the phase needs,
-/// and each phase's content dissolves in once the shape is underway.
+/// Phase-pinned content hosted by `RecorderPanelController`. The native window
+/// follows the island's measured size; its shadow is drawn outside the window
+/// by AppKit, so transparent padding never blocks placement at a screen edge.
 struct RecorderMainWindowRoot: View {
     @ObservedObject var model: AppModel
     let phase: AppPhase
-    var onRecordingWidthChange: (CGFloat) -> Void = { _ in }
+    var onContentSizeChange: (CGSize) -> Void = { _ in }
     @State private var islandSize = CGSize.zero
 
     var body: some View {
         ZStack {
-            RecorderSurfaceShape(radius: islandSize.height / 2, castsShadow: true)
+            RecorderSurfaceShape(radius: islandSize.height / 2)
                 .frame(width: islandSize.width, height: islandSize.height)
                 .allowsHitTesting(false)
             Group {
@@ -150,8 +150,7 @@ struct RecorderMainWindowRoot: View {
         }
         .contentShape(Capsule())
         .modifier(RecorderSystemWindowDragModifier())
-        .frame(width: RecorderPanelPolicy.canvasSize.width, height: RecorderPanelPolicy.canvasSize.height)
-        .animation(RecorderMotion.morph, value: islandSize)
+        .fixedSize()
         .animation(RecorderMotion.morph, value: phase)
         .font(.appUI(.body))
         .appControlFocusAppearance()
@@ -162,16 +161,18 @@ struct RecorderMainWindowRoot: View {
             .fixedSize()
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
                 guard size.width > 0, size.height > 0 else { return }
-                if islandSize == .zero {
-                    // Establish the first complete island before the window
-                    // fades in. Animating an invented initial size also starts
-                    // descendant insertion transitions during launch layout.
-                    var initialLayout = Transaction(animation: nil)
-                    initialLayout.disablesAnimations = true
-                    withTransaction(initialLayout) { islandSize = size }
-                } else {
+                // The surface and native frame share the same measured bounds.
+                // Interpolating only the surface inside a compact window clips
+                // it during a shrink or leaves an oversized invisible target.
+                var layout = Transaction(animation: nil)
+                layout.disablesAnimations = true
+                withTransaction(layout) {
                     islandSize = size
+                    onContentSizeChange(size)
                 }
+            }
+            .onAppear {
+                if islandSize != .zero { onContentSizeChange(islandSize) }
             }
             .transition(.recorderContent)
     }

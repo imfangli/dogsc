@@ -27,40 +27,69 @@ struct NativePlaybackTimeView: NSViewRepresentable {
 @MainActor
 final class NativePlaybackTimeNSView: NSView {
     private weak var playbackController: EditorPlaybackController?
-    private let textField = NSTextField(labelWithString: "00:00.00")
+    /// A layer, not an NSTextField: a label's string change invalidates its
+    /// intrinsic size, which marked the window for a full layout pass on
+    /// every playback frame and redrew through the NSView display machinery
+    /// (measured as most of the remaining main-thread commit cost).
+    private let textLayer = CATextLayer()
+    private let font = NSFont.monospacedDigitSystemFont(ofSize: 13.5, weight: .semibold)
     private var lastDisplayedCentiseconds: Int?
+    private var currentText = "00:00.00"
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        textField.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
-        textField.textColor = .labelColor
-        textField.alignment = .right
-        textField.isBezeled = false
-        textField.drawsBackground = false
-        textField.isEditable = false
-        textField.isSelectable = false
-        addSubview(textField)
+        wantsLayer = true
+        textLayer.font = font
+        textLayer.fontSize = font.pointSize
+        textLayer.alignmentMode = .right
+        textLayer.truncationMode = .none
+        textLayer.isWrapped = false
+        textLayer.string = currentText
+        textLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        textLayer.actions = ["contents": NSNull(), "string": NSNull(), "bounds": NSNull(), "position": NSNull()]
+        layer?.addSublayer(textLayer)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityValue(currentText)
+        updateTextColor()
     }
 
     required init?(coder: NSCoder) { nil }
 
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: ceil(font.ascender - font.descender + font.leading))
+    }
+
     override func layout() {
         super.layout()
-        // An NSTextField label aligns its glyphs near the top when stretched
-        // to the full 28-point transport slot. The duration on the other side
-        // is a vertically centred SwiftUI Text, which made the two clocks look
-        // like different rows. Lay out the native label at its intrinsic
-        // height and centre that rect instead.
-        let intrinsicHeight = min(
-            ceil(textField.intrinsicContentSize.height),
-            bounds.height
-        )
-        textField.frame = CGRect(
+        // Centre one text line in the transport slot, matching the vertically
+        // centred SwiftUI duration on the other side.
+        let lineHeight = min(ceil(font.ascender - font.descender + font.leading), bounds.height)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        textLayer.frame = CGRect(
             x: 0,
-            y: floor((bounds.height - intrinsicHeight) / 2),
+            y: floor((bounds.height - lineHeight) / 2),
             width: bounds.width,
-            height: intrinsicHeight
+            height: lineHeight
         )
+        CATransaction.commit()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        textLayer.contentsScale = window?.backingScaleFactor ?? 2
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateTextColor()
+    }
+
+    private func updateTextColor() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            textLayer.foregroundColor = NSColor.labelColor.cgColor
+        }
     }
 
     func configure(_ playbackController: EditorPlaybackController) {
@@ -95,15 +124,12 @@ final class NativePlaybackTimeNSView: NSView {
         let minutes = centiseconds / 6_000
         let seconds = (centiseconds / 100) % 60
         let fraction = centiseconds % 100
+        currentText = String(format: "%02d:%02d.%02d", minutes, seconds, fraction)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        textField.stringValue = String(
-            format: "%02d:%02d.%02d",
-            minutes,
-            seconds,
-            fraction
-        )
+        textLayer.string = currentText
         CATransaction.commit()
+        setAccessibilityValue(currentText)
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -129,6 +155,9 @@ struct NativeTimelinePlayheadView: NSViewRepresentable {
     var scrollView: NSScrollView? = nil
     var leadingInset: CGFloat = 0
     var documentWidth: CGFloat? = nil
+    /// While the playhead is being dragged its knob grows, so the hand can
+    /// feel what it is holding.
+    var isEmphasized = false
 
     func makeNSView(context: Context) -> NativeTimelinePlayheadNSView {
         let view = NativeTimelinePlayheadNSView()
@@ -146,6 +175,7 @@ struct NativeTimelinePlayheadView: NSViewRepresentable {
             scrollView: scrollView, leadingInset: leadingInset,
             documentWidth: documentWidth
         )
+        view.setEmphasized(isEmphasized)
     }
 
     static func dismantleNSView(_ view: NativeTimelinePlayheadNSView, coordinator: Void) {
@@ -157,6 +187,7 @@ struct NativeTimelinePlayheadView: NSViewRepresentable {
 final class NativeTimelinePlayheadNSView: NSView {
     private weak var playbackController: EditorPlaybackController?
     private var duration: TimeInterval = 0
+    private let lineRimLayer = CALayer()
     private let lineLayer = CALayer()
     private let knobLayer = CAShapeLayer()
     private var part: NativeTimelinePlayheadPart = .line
@@ -164,15 +195,35 @@ final class NativeTimelinePlayheadNSView: NSView {
     private var scrollObservations: [NSObjectProtocol] = []
     private var leadingInset: CGFloat = 0
     private var documentWidth: CGFloat?
+    private var isEmphasized = false
+
+    func setEmphasized(_ emphasized: Bool) {
+        guard emphasized != isEmphasized else { return }
+        isEmphasized = emphasized
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(RecorderMotion.reduces ? 0 : 0.18)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.3, 1.15))
+        knobLayer.setAffineTransform(emphasized ? CGAffineTransform(scaleX: 1.25, y: 1.25) : .identity)
+        CATransaction.commit()
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        knobLayer.lineWidth = 1
+        // A slim capsule handle reads as a grip on the time axis rather than
+        // a dot; the paper rim separates it from clips passing underneath.
+        knobLayer.lineWidth = 1.5
         knobLayer.path = CGPath(
-            ellipseIn: CGRect(x: 0, y: 0, width: 10, height: 10),
-            transform: nil
+            roundedRect: CGRect(x: 0, y: 0, width: 11, height: 17),
+            cornerWidth: 5.5, cornerHeight: 5.5, transform: nil
         )
+        // Keep the path and bounds in the same coordinate space. Updating
+        // frame while a scale transform is active changes bounds underneath
+        // the fixed path, leaving the grip off-centre after a seek.
+        knobLayer.bounds = CGRect(x: 0, y: 0, width: 11, height: 17)
+        // A solid, narrow rim separates the red line from media without a
+        // moving blur/shadow surface crossing the clip's selection glow.
+        layer?.addSublayer(lineRimLayer)
         layer?.addSublayer(lineLayer)
         layer?.addSublayer(knobLayer)
         updateAppearanceColors()
@@ -186,13 +237,17 @@ final class NativeTimelinePlayheadNSView: NSView {
     }
 
     private func updateAppearanceColors() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            lineLayer.backgroundColor = NSColor.labelColor.cgColor
-            knobLayer.fillColor = NSColor.labelColor.cgColor
-            knobLayer.strokeColor = NSColor.windowBackgroundColor
-                .withAlphaComponent(0.85)
-                .cgColor
+            // A red current-time line, as in most editors: it is the one
+            // colour no lane uses, so it reads on every track.
+            lineLayer.backgroundColor = EditorPlayheadColor.line.cgColor
+            lineRimLayer.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.6).cgColor
+            knobLayer.fillColor = EditorPlayheadColor.line.cgColor
+            knobLayer.strokeColor = NSColor.windowBackgroundColor.cgColor
         }
+        CATransaction.commit()
     }
 
     override func layout() {
@@ -266,12 +321,14 @@ final class NativeTimelinePlayheadNSView: NSView {
         let viewportWidth = visible?.width ?? max(bounds.width - leadingInset, 0)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        lineRimLayer.isHidden = part != .line
         lineLayer.isHidden = part != .line
         // An offscreen playhead must disappear, never stick to a viewport edge.
         knobLayer.isHidden = part != .knob || knobX < leadingInset
             || knobX > leadingInset + viewportWidth
-        lineLayer.frame = CGRect(x: lineX - 1, y: 0, width: 2, height: bounds.height)
-        knobLayer.frame = CGRect(x: knobX - 5, y: bounds.height - 12, width: 10, height: 10)
+        lineLayer.frame = CGRect(x: lineX - 0.75, y: 0, width: 1.5, height: bounds.height)
+        lineRimLayer.frame = CGRect(x: lineX - 1.75, y: 0, width: 3.5, height: bounds.height)
+        knobLayer.position = CGPoint(x: knobX, y: bounds.height - 12.5)
         CATransaction.commit()
     }
 
@@ -293,15 +350,17 @@ struct NativeTimelineOverviewView: NSViewRepresentable {
     let scrollView: NSScrollView?
     let playbackController: EditorPlaybackController
     let duration: TimeInterval
+    /// Where the effects are across the whole recording, in their lane colours.
+    var markers: [EditorOverviewMarker] = []
 
     func makeNSView(context: Context) -> NativeTimelineOverviewNSView {
         let view = NativeTimelineOverviewNSView()
-        view.configure(scrollView: scrollView, playbackController: playbackController, duration: duration)
+        view.configure(scrollView: scrollView, playbackController: playbackController, duration: duration, markers: markers)
         return view
     }
 
     func updateNSView(_ view: NativeTimelineOverviewNSView, context: Context) {
-        view.configure(scrollView: scrollView, playbackController: playbackController, duration: duration)
+        view.configure(scrollView: scrollView, playbackController: playbackController, duration: duration, markers: markers)
     }
 
     static func dismantleNSView(_ view: NativeTimelineOverviewNSView, coordinator: Void) {
@@ -319,6 +378,8 @@ final class NativeTimelineOverviewNSView: NSView {
     private let trackLayer = CALayer()
     private let viewportLayer = CALayer()
     private let playheadLayer = CALayer()
+    private var markers: [EditorOverviewMarker] = []
+    private var markerLayers: [CALayer] = []
     private var hoverTrackingArea: NSTrackingArea?
     private var isPointerInside = false
     private var isPointerDown = false
@@ -327,15 +388,11 @@ final class NativeTimelineOverviewNSView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         trackLayer.borderWidth = 0
-        trackLayer.cornerRadius = 2.5
+        trackLayer.cornerRadius = 2
         viewportLayer.borderWidth = 0
-        viewportLayer.cornerRadius = 2.5
-        playheadLayer.backgroundColor = NSColor(
-            calibratedRed: 0.90,
-            green: 0.67,
-            blue: 0.36,
-            alpha: 1
-        ).cgColor
+        viewportLayer.cornerRadius = 2
+        // The same red as the detailed timeline's playhead.
+        playheadLayer.backgroundColor = EditorPlayheadColor.line.cgColor
         playheadLayer.cornerRadius = 1
         playheadLayer.shadowColor = NSColor.black.cgColor
         playheadLayer.shadowOpacity = 0
@@ -377,8 +434,21 @@ final class NativeTimelineOverviewNSView: NSView {
     func configure(
         scrollView: NSScrollView?,
         playbackController: EditorPlaybackController,
-        duration: TimeInterval
+        duration: TimeInterval,
+        markers: [EditorOverviewMarker] = []
     ) {
+        if markers != self.markers {
+            self.markers = markers
+            markerLayers.forEach { $0.removeFromSuperlayer() }
+            markerLayers = markers.map { marker in
+                let layer = CALayer()
+                layer.backgroundColor = marker.color.cgColor
+                layer.cornerRadius = 1
+                layer.actions = ["position": NSNull(), "bounds": NSNull()]
+                return layer
+            }
+            markerLayers.forEach { self.layer?.insertSublayer($0, above: trackLayer) }
+        }
         if self.playbackController !== playbackController {
             self.playbackController?.removeNativeTimelineObserver(self)
             playbackController.addNativeTimelineObserver(self)
@@ -426,13 +496,21 @@ final class NativeTimelineOverviewNSView: NSView {
         // inset would put the overview's zero marker on a different axis.
         let track = CGRect(
             x: 0,
-            y: max((bounds.height - 5) / 2, 0),
+            y: max((bounds.height - 4) / 2, 0),
             width: max(bounds.width, 1),
-            height: 5
+            height: 4
         )
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         trackLayer.frame = track
+        for (marker, layer) in zip(markers, markerLayers) {
+            let start = min(max(marker.start, 0), 1)
+            let end = min(max(marker.end, start), 1)
+            layer.frame = CGRect(
+                x: track.minX + track.width * CGFloat(start), y: track.minY,
+                width: max(track.width * CGFloat(end - start), 2), height: track.height
+            )
+        }
         guard let scrollView = trackedScrollView else {
             viewportLayer.frame = track
             CATransaction.commit()
@@ -514,7 +592,7 @@ final class NativeTimelineOverviewNSView: NSView {
             ).cgColor
             trackLayer.borderColor = chrome.withAlphaComponent(0.06).cgColor
             viewportLayer.backgroundColor = chrome.withAlphaComponent(
-                isPointerDown ? 0.24 : isPointerInside ? 0.18 : 0.11
+                isPointerDown ? 0.24 : isPointerInside ? 0.17 : 0.09
             ).cgColor
             viewportLayer.borderColor = chrome.withAlphaComponent(
                 isPointerDown ? 0.82 : isPointerInside ? 0.64 : 0.48
@@ -558,4 +636,14 @@ extension NativeTimelineOverviewNSView: EditorPlaybackTimelineObserver {
         duration = max(snapshot.duration, 0)
         updatePlayhead(time: snapshot.outputTime, isPlaying: snapshot.isPlaying)
     }
+}
+
+enum EditorPlayheadColor {
+    static let line = NSColor(calibratedRed: 1.0, green: 0.27, blue: 0.23, alpha: 1)
+}
+
+struct EditorOverviewMarker: Equatable {
+    let start: Double
+    let end: Double
+    let color: NSColor
 }

@@ -2,298 +2,344 @@ import AppKit
 import SwiftUI
 
 // MARK: - Settings palette
-// All settings surfaces inherit the same appearance as the recorder.
+// Settings is built from the recorder's own parts: one solid island, quiet
+// glyphs, a recessed track with a raised thumb, and the same springs.
 
 enum SettingsTheme {
     static let canvasBackground = Color(nsColor: RecorderStyle.canvasNSColor)
-    static let cardBackground = RecorderStyle.base
-    static let cardBorder = LinearGradient(
-        colors: [RecorderStyle.chrome.opacity(0.09), RecorderStyle.chrome.opacity(0.025)],
-        startPoint: .top,
-        endPoint: .bottom
-    )
-    static let divider = RecorderStyle.chrome.opacity(0.06)
-    static let well = RecorderStyle.chrome.opacity(0.06)
-    static let wellHover = RecorderStyle.chrome.opacity(0.10)
     static let textPrimary = RecorderStyle.ink
     static let textSecondary = RecorderStyle.muted
     static let textFaint = RecorderStyle.faint
-
-    static let mint = Color(red: 0.30, green: 0.86, blue: 0.55)
-    static let mintWash = Color(red: 0.30, green: 0.86, blue: 0.55).opacity(0.18)
+    /// A recessed channel for choices and menus.
+    static let track = RecorderStyle.chrome.opacity(0.06)
+    /// The raised thumb inside a track: paper on Aqua, a lit slab on Dark Aqua.
+    static let thumb = Color(nsColor: RecorderStyle.adaptive(.white, .white.withAlphaComponent(0.13)))
+    static let thumbShadow = Color(nsColor: RecorderStyle.adaptive(
+        .black.withAlphaComponent(0.12), .black.withAlphaComponent(0.32)))
+    static let hover = RecorderStyle.chrome.opacity(0.045)
+    static let mint = RecorderStyle.mint
     static let recording = RecorderStyle.destructiveInk
-    static let recordingWash = Color(red: 1.0, green: 0.28, blue: 0.24).opacity(0.18)
     static let amber = RecorderStyle.amberInk
-    static let amberWash = Color(red: 0.95, green: 0.68, blue: 0.28).opacity(0.18)
 }
 
 enum SettingsMotion {
-    static var reduces: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+    static var reduces: Bool { RecorderMotion.reduces }
     static var springMorph: Animation? { RecorderMotion.settle }
     static var springSnappy: Animation? { RecorderMotion.quick }
-    static var springGentle: Animation? { RecorderMotion.morph }
     static var quick: Animation { .easeOut(duration: 0.16) }
 }
 
-// MARK: - Card Container
+enum SettingsLayout {
+    static let islandRadius: CGFloat = 26
+    static let islandInset: CGFloat = 8
+    /// Tiles sit 14 pt inside the island, so 18 pt keeps them concentric.
+    static let tileRadius: CGFloat = 18
+}
 
-struct SettingsCard<Content: View>: View {
-    let title: String?
-    let footer: String?
-    var footerColor: Color = SettingsTheme.textSecondary
-    let content: Content
+// MARK: - Page parts
 
-    init(
-        _ title: String? = nil,
-        footer: String? = nil,
-        footerColor: Color = SettingsTheme.textSecondary,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.title = title
-        self.footer = footer
-        self.footerColor = footerColor
-        self.content = content()
-    }
-
+/// A small caption above a cluster of tiles.
+struct SettingsCaption: View {
+    let key: String
+    init(_ key: String) { self.key = key }
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let title {
-                Text(appLocalized(title))
-                    .font(.appUI(size: 11.5, weight: .medium))
-                    .foregroundStyle(SettingsTheme.textSecondary)
-                    .padding(.leading, 18)
-                    .accessibilityAddTraits(.isHeader)
-            }
-
-            VStack(spacing: 0) {
-                content
-            }
-            .padding(.vertical, 4)
+        Text(appLocalized(key))
+            .font(.appUI(size: 11.5, weight: .medium))
+            .foregroundStyle(SettingsTheme.textFaint)
+            .padding(.leading, 8)
+            .padding(.top, 14)
+            .padding(.bottom, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            // The recorder surface: opaque fill, fine top edge and cast shadow.
-            // Rows clip to the shape first; the surface and its shadow sit outside the clip.
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .background { RecorderSurfaceShape(radius: 20, castsShadow: true) }
-
-            if let footer {
-                Text(appLocalized(footer))
-                    .font(EditorTypography.helper)
-                    .foregroundStyle(footerColor)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 4)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
+            .consoleReveal()
     }
 }
 
-// MARK: - Divider
+/// The slab every page is composed of: a faint fill on the island, no
+/// outline, no shadow. Tinted when it carries a state worth noticing.
+struct SettingsTile: ViewModifier {
+    var tint: Color? = nil
+    var hovered = false
+    func body(content: Content) -> some View {
+        content.background {
+            RoundedRectangle(cornerRadius: SettingsLayout.tileRadius, style: .continuous)
+                .fill(tint.map { $0.opacity(hovered ? 0.15 : 0.11) }
+                      ?? RecorderStyle.chrome.opacity(hovered ? 0.075 : 0.045))
+        }
+        .consoleReveal()
+    }
+}
 
-struct SettingsDivider: View {
-    var leadingInset: CGFloat = 54
+extension View {
+    func settingsTile(tint: Color? = nil, hovered: Bool = false) -> some View {
+        modifier(SettingsTile(tint: tint, hovered: hovered))
+    }
+}
+
+// MARK: - Island
+
+/// The island keeps its existing height morph; page content shares the
+/// editor's short drop, delayed rise and staggered module arrival.
+struct SettingsIsland<Content: View>: View {
+    let pageID: AppSettingsSection
+    let maxHeight: CGFloat
+    var onHeightChange: (CGFloat) -> Void = { _ in }
+    @ViewBuilder let content: () -> Content
+    @State private var contentHeight: CGFloat = 0
+    private static var topAnchor: String { "settings.island.top" }
+
     var body: some View {
-        Rectangle()
-            .fill(SettingsTheme.divider)
-            .frame(height: 1)
-            .padding(.leading, leadingInset)
-            .padding(.trailing, 18)
+        let height = min(contentHeight, maxHeight)
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: 0).id(Self.topAnchor)
+                    ZStack(alignment: .top) {
+                        content()
+                            .padding(SettingsLayout.islandInset)
+                            .frame(maxWidth: .infinity, alignment: .top)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded(.up) } action: { measured in
+                                guard measured > 0 else { return }
+                                if contentHeight == 0 {
+                                    // The first page establishes the island
+                                    // without growing from an invented size.
+                                    var initial = Transaction(animation: nil)
+                                    initial.disablesAnimations = true
+                                    withTransaction(initial) { contentHeight = measured }
+                                } else {
+                                    contentHeight = measured
+                                }
+                            }
+                            .coordinateSpace(name: EditorConsole.scrollSpace)
+                            .environment(\.consoleReveal, true)
+                            .consolePageArrival()
+                            .id(pageID)
+                            .transition(.consolePage)
+                    }
+                }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollIndicators(contentHeight > maxHeight ? .automatic : .never)
+            .frame(height: max(height, 1))
+            .clipShape(RoundedRectangle(cornerRadius: SettingsLayout.islandRadius, style: .continuous))
+            .background { RecorderSurfaceShape(radius: SettingsLayout.islandRadius, castsShadow: true) }
+            .opacity(contentHeight == 0 ? 0 : 1)
+            .animation(RecorderMotion.morph, value: height)
+            .onChange(of: pageID) { _, _ in proxy.scrollTo(Self.topAnchor, anchor: .top) }
+            .onChange(of: height, initial: true) { _, value in
+                if value > 0 { onHeightChange(value) }
+            }
+        }
+    }
+}
+
+/// The navigation label arrives with the selection and steps aside quickly.
+private struct SettingsLabelPhase: ViewModifier {
+    let hidden: Bool
+    func body(content: Content) -> some View {
+        content
+            .opacity(hidden ? 0 : 1)
+            .scaleEffect(hidden ? 0.86 : 1, anchor: .leading)
+            .blur(radius: hidden ? 4 : 0)
+    }
+}
+
+extension AnyTransition {
+    static var settingsLabel: AnyTransition {
+        guard !RecorderMotion.reduces else { return .opacity }
+        return .asymmetric(
+            insertion: .modifier(active: SettingsLabelPhase(hidden: true), identity: SettingsLabelPhase(hidden: false))
+                .animation(.easeOut(duration: 0.24).delay(0.06)),
+            removal: .opacity.animation(.easeIn(duration: 0.08))
+        )
+    }
+}
+
+// MARK: - Ringing bell
+
+/// The notification bell swings when the sample plays and dims when the
+/// sound is off, matching the input glyphs' on/off language.
+struct SettingsRingingBell: View {
+    let ringing: Bool
+    let enabled: Bool
+    var size: CGFloat = 18
+
+    var body: some View {
+        AppLineIcon(kind: .bell, size: size)
+            .foregroundStyle(enabled ? SettingsTheme.textSecondary : SettingsTheme.textFaint)
+            .keyframeAnimator(initialValue: 0.0, trigger: ringing) { view, angle in
+                view.rotationEffect(.degrees(RecorderMotion.reduces ? 0 : angle), anchor: .top)
+            } keyframes: { _ in
+                if ringing {
+                    CubicKeyframe(16, duration: 0.08)
+                    CubicKeyframe(-13, duration: 0.12)
+                    CubicKeyframe(9, duration: 0.12)
+                    CubicKeyframe(-5, duration: 0.12)
+                    SpringKeyframe(0, duration: 0.3, spring: Spring(duration: 0.3, bounce: 0.2))
+                } else {
+                    CubicKeyframe(0, duration: 0.01)
+                }
+            }
+            .animation(RecorderMotion.fade, value: enabled)
             .accessibilityHidden(true)
     }
 }
 
-// MARK: - Row
+// MARK: - Sound preview
 
-struct SettingsRow<Trailing: View>: View {
-    let icon: AppLineIcon.Kind?
-    let title: String
-    let detail: String?
-    var detailColor: Color = SettingsTheme.textSecondary
-    var singleLineDetail: Bool = false
-    var stacksControl: Bool = false
-    let trailing: Trailing
-
-    init(
-        icon: AppLineIcon.Kind? = nil,
-        title: String,
-        detail: String? = nil,
-        detailColor: Color = SettingsTheme.textSecondary,
-        singleLineDetail: Bool = false,
-        stacksControl: Bool = false,
-        @ViewBuilder trailing: () -> Trailing
-    ) {
-        self.icon = icon
-        self.title = title
-        self.detail = detail
-        self.detailColor = detailColor
-        self.singleLineDetail = singleLineDetail
-        self.stacksControl = stacksControl
-        self.trailing = trailing()
-    }
-
-    var body: some View {
-        Group {
-            if stacksControl {
-                VStack(alignment: .leading, spacing: 14) {
-                    heading
-                    trailing
-                        .padding(.leading, icon == nil ? 0 : 36)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 20) {
-                        heading
-                        Spacer(minLength: 0)
-                        trailing.fixedSize()
-                    }
-                    VStack(alignment: .leading, spacing: 14) {
-                        heading
-                        trailing
-                            .padding(.leading, icon == nil ? 0 : 36)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, stacksControl || detail != nil ? 16 : 14)
-        .frame(minHeight: 58)
-    }
-
-    private var heading: some View {
-        HStack(alignment: .center, spacing: 12) {
-            if let icon {
-                AppLineIcon(kind: icon, size: 18)
-                    .foregroundStyle(SettingsTheme.textSecondary)
-                    .frame(width: 24)
-                    .accessibilityHidden(true)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(appLocalized(title))
-                    .font(.appUI(size: 13, weight: .medium))
-                    .foregroundStyle(SettingsTheme.textPrimary)
-                    .fixedSize(horizontal: true, vertical: false)
-
-                if let detail {
-                    if singleLineDetail {
-                        Text(detail)
-                            .font(EditorTypography.helper)
-                            .foregroundStyle(detailColor)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    } else {
-                        Text(appLocalized(detail))
-                            .font(EditorTypography.helper)
-                            .foregroundStyle(detailColor)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
-
-        }
-    }
-}
-
-// MARK: - Interactive Link Row
-
-struct SettingsLinkRow: View {
-    let icon: AppLineIcon.Kind
-    let title: String
-    var detail: String? = nil
-    var trailingIcon: AppLineIcon.Kind = .external
-    var accessibilityIdentifier: String? = nil
+/// A round play action. While the sample sounds, a ring opens outward the
+/// way the microphone ring opens with live input.
+struct SettingsSoundPreviewButton: View {
+    let isPlaying: Bool
     let action: () -> Void
-
-    @State private var hovered = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                AppLineIcon(kind: icon, size: 18)
-                    .foregroundStyle(SettingsTheme.textSecondary)
-                    .frame(width: 24)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(appLocalized(title))
-                        .font(.appUI(size: 13, weight: .medium))
-                        .foregroundStyle(SettingsTheme.textPrimary)
-
-                    if let detail {
-                        Text(appLocalized(detail))
-                            .font(EditorTypography.helper)
-                            .foregroundStyle(SettingsTheme.textSecondary)
-                    }
-                }
-
-                Spacer(minLength: 12)
-
-                AppLineIcon(kind: trailingIcon, size: 14)
-                    .foregroundStyle(SettingsTheme.textSecondary)
-                    .offset(x: hovered && !SettingsMotion.reduces ? 2 : 0,
-                            y: hovered && !SettingsMotion.reduces && trailingIcon == .external ? -2 : 0)
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 16)
-            .frame(minHeight: 56)
-            .background(RecorderStyle.chrome.opacity(hovered ? 0.05 : 0))
-            .contentShape(Rectangle())
+            AppLineIcon(kind: .speaker, size: 14)
+                .foregroundStyle(isPlaying ? RecorderStyle.positiveInk : SettingsTheme.textPrimary)
+                .modifier(SettingsActivationFeedback(trigger: isPlaying ? 1 : 0))
         }
-        .buttonStyle(SettingsPressStyle(scale: 0.99))
-        .onHover { hovering in
-            withAnimation(SettingsMotion.springSnappy) { hovered = hovering }
+        .buttonStyle(SettingsCircleButtonStyle())
+        .overlay {
+            SettingsRipple(active: isPlaying)
+                .allowsHitTesting(false)
         }
-        .modifier(OptionalAccessibilityIdentifier(id: accessibilityIdentifier))
+        .help(appLocalized("试听"))
+        .accessibilityLabel(appLocalized("试听导出完成提示音"))
     }
 }
 
-private struct OptionalAccessibilityIdentifier: ViewModifier {
-    let id: String?
-    func body(content: Content) -> some View {
-        if let id {
-            content.accessibilityIdentifier(id)
-        } else {
-            content
+private struct SettingsRipple: View {
+    let active: Bool
+    var body: some View {
+        Circle()
+            .strokeBorder(RecorderStyle.positiveInk, lineWidth: 1.5)
+            .frame(width: 30, height: 30)
+            .keyframeAnimator(initialValue: RippleFrame(), trigger: active) { view, frame in
+                view.scaleEffect(frame.scale).opacity(frame.opacity)
+            } keyframes: { _ in
+                KeyframeTrack(\.scale) {
+                    CubicKeyframe(1, duration: 0.01)
+                    CubicKeyframe(active && !RecorderMotion.reduces ? 1.6 : 1, duration: 0.7)
+                }
+                KeyframeTrack(\.opacity) {
+                    CubicKeyframe(active ? 0.8 : 0, duration: 0.01)
+                    CubicKeyframe(0, duration: 0.7)
+                }
+            }
+            .accessibilityHidden(true)
+    }
+
+    struct RippleFrame {
+        var scale: CGFloat = 1
+        var opacity: Double = 0
+    }
+}
+
+// MARK: - Permission summary
+
+/// How many of the four capture permissions are granted, as a ring that
+/// fills on arrival. Amber until screen recording and accessibility are on.
+struct SettingsPermissionSummary: View {
+    let granted: Int
+    let total: Int
+    let requiredReady: Bool
+    @State private var arrived = false
+
+    var body: some View {
+        let tint = requiredReady ? RecorderStyle.positiveInk : SettingsTheme.amber
+        HStack(spacing: 14) {
+            ZStack {
+                Circle().stroke(RecorderStyle.chrome.opacity(0.08), lineWidth: 4)
+                Circle()
+                    .trim(from: 0, to: arrived ? CGFloat(granted) / CGFloat(max(total, 1)) : 0)
+                    .stroke(tint, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                Text("\(granted)/\(total)")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(SettingsTheme.textPrimary)
+                    .contentTransition(.numericText())
+            }
+            .frame(width: 46, height: 46)
+
+            Text(appLocalized(requiredReady ? "录制所需权限已就绪" : "屏幕录制或辅助功能尚未就绪，录制可能缺少画面或光标。"))
+                .font(.appUI(size: 12.5, weight: .medium))
+                .foregroundStyle(SettingsTheme.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
         }
+        .padding(14)
+        .background(tint.opacity(requiredReady ? 0.08 : 0.10),
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .animation(RecorderMotion.morph, value: granted)
+        .animation(RecorderMotion.fade, value: requiredReady)
+        .onAppear {
+            withAnimation((RecorderMotion.morph ?? .easeOut(duration: 0.2)).delay(0.18)) { arrived = true }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
 // MARK: - Toggle
 
+/// A green-when-live switch. While held, the knob stretches toward the side
+/// it is about to travel to, then settles on the recorder spring.
 struct SettingsToggle: View {
     @Binding var isOn: Bool
     var accessibilityLabel: String = ""
     var accessibilityHint: String = ""
 
+    var body: some View {
+        Button {
+            withAnimation(RecorderMotion.settle) { isOn.toggle() }
+        } label: {
+            Color.clear.frame(width: 42, height: 24)
+        }
+        .buttonStyle(SwitchStyle(isOn: isOn))
+        .appButtonKeyboardFocus(in: Capsule(style: .continuous))
+        .accessibilityLabel(appLocalized(accessibilityLabel))
+        .accessibilityValue(appLocalized(isOn ? "开关状态 · 开启" : "开关状态 · 关闭"))
+        .accessibilityHint(appLocalized(accessibilityHint))
+    }
+
+    private struct SwitchStyle: ButtonStyle {
+        let isOn: Bool
+        func makeBody(configuration: Configuration) -> some View {
+            SettingsSwitchTrack(isOn: isOn, pressed: configuration.isPressed)
+        }
+    }
+}
+
+/// The switch artwork, shared by the standalone toggle and input tiles.
+struct SettingsSwitchTrack: View {
+    let isOn: Bool
+    let pressed: Bool
+    var compact = false
+    @Environment(\.isEnabled) private var isEnabled
     @State private var hovered = false
 
     var body: some View {
-        Button {
-            withAnimation(SettingsMotion.springMorph) {
-                isOn.toggle()
-            }
-        } label: {
-            ZStack {
-                Capsule(style: .continuous)
-                    .fill(isOn ? RecorderStyle.positiveInk : RecorderStyle.chrome.opacity(0.12))
-                    .animation(RecorderMotion.fade, value: isOn)
-                Circle()
-                    .fill(Color.white)
-                    .shadow(color: Color.black.opacity(0.24), radius: 3, y: 1)
-                    .frame(width: 18, height: 18)
-                    .offset(x: isOn ? 10 : -10)
-                    .animation(RecorderMotion.settle, value: isOn)
-            }
-            .frame(width: 44, height: 24)
-            .scaleEffect(hovered && !SettingsMotion.reduces ? 1.04 : 1.0)
-            .animation(SettingsMotion.springSnappy, value: hovered)
-            .contentShape(Capsule(style: .continuous))
+        let held = pressed && isEnabled && !RecorderMotion.reduces
+        let knob: CGFloat = compact ? 16 : 20
+        ZStack(alignment: isOn ? .trailing : .leading) {
+            Capsule(style: .continuous)
+                .fill(isOn ? RecorderStyle.positiveInk : RecorderStyle.chrome.opacity(hovered && isEnabled ? 0.17 : 0.12))
+            Capsule(style: .continuous)
+                .fill(Color.white)
+                .shadow(color: Color.black.opacity(0.22), radius: 2.5, y: 1)
+                .frame(width: held ? knob + knob / 4 : knob, height: knob)
+                .padding(2)
         }
-        .buttonStyle(SettingsPressStyle(scale: 0.94))
+        .frame(width: compact ? 34 : 42, height: knob + 4)
+        .contentShape(Capsule(style: .continuous))
+        .opacity(isEnabled ? 1 : 0.4)
         .onHover { hovered = $0 }
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityValue(appLocalized(isOn ? "开关状态 · 开启" : "开关状态 · 关闭"))
-        .accessibilityHint(accessibilityHint)
+        .animation(RecorderMotion.settle, value: isOn)
+        .animation(held ? .easeOut(duration: 0.1) : RecorderMotion.quick, value: held)
+        .animation(RecorderMotion.fade, value: hovered)
     }
 }
 
@@ -301,14 +347,16 @@ struct SettingsToggle: View {
 
 struct SettingsPillButtonStyle: ButtonStyle {
     var prominent = false
+    var compact = false
 
     func makeBody(configuration: Configuration) -> Pill {
-        Pill(configuration: configuration, prominent: prominent)
+        Pill(configuration: configuration, prominent: prominent, compact: compact)
     }
 
     struct Pill: View {
         let configuration: Configuration
         let prominent: Bool
+        let compact: Bool
         @Environment(\.isEnabled) private var isEnabled
         @State private var hovered = false
 
@@ -318,11 +366,12 @@ struct SettingsPillButtonStyle: ButtonStyle {
                 .font(.appUI(size: 12, weight: .medium))
                 .lineLimit(1)
                 .fixedSize()
-                .foregroundStyle(foreground(pressed: pressed))
-                .padding(.horizontal, 14)
-                .frame(height: 32)
+                .foregroundStyle(prominent ? RecorderStyle.onPrimary : SettingsTheme.textPrimary)
+                .padding(.horizontal, compact ? 11 : 14)
+                .frame(height: compact ? 26 : 30)
                 .background(background(pressed: pressed), in: Capsule(style: .continuous))
                 .contentShape(Capsule(style: .continuous))
+                .appKeyboardFocus(in: Capsule(style: .continuous))
                 .scaleEffect(pressed && !SettingsMotion.reduces ? 0.95 : 1)
                 .opacity(isEnabled ? 1 : 0.4)
                 .onHover { hovered = $0 }
@@ -330,20 +379,40 @@ struct SettingsPillButtonStyle: ButtonStyle {
                 .animation(SettingsMotion.quick, value: hovered)
         }
 
-        private func foreground(pressed: Bool) -> Color {
-            if prominent {
-                return RecorderStyle.onPrimary
-            }
-            return SettingsTheme.textPrimary
-        }
-
         private func background(pressed: Bool) -> Color {
             if prominent {
-                return RecorderStyle.primaryFill.opacity(pressed ? 0.8 : hovered ? 0.94 : 0.98)
+                return RecorderStyle.primaryFill.opacity(pressed ? 0.8 : hovered ? 0.92 : 0.98)
             }
-            return RecorderStyle.chrome.opacity(pressed ? 0.16 : hovered ? 0.11 : 0.07)
+            return RecorderStyle.chrome.opacity(pressed ? 0.15 : hovered && isEnabled ? 0.11 : 0.07)
         }
+    }
+}
 
+/// A round glyph action that sits beside pill buttons, e.g. reveal in Finder.
+struct SettingsCircleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> Body {
+        Body(configuration: configuration)
+    }
+
+    struct Body: View {
+        let configuration: Configuration
+        @Environment(\.isEnabled) private var isEnabled
+        @State private var hovered = false
+
+        var body: some View {
+            let pressed = configuration.isPressed && isEnabled
+            configuration.label
+                .foregroundStyle(hovered ? SettingsTheme.textPrimary : SettingsTheme.textSecondary)
+                .frame(width: 30, height: 30)
+                .background(RecorderStyle.chrome.opacity(pressed ? 0.15 : hovered ? 0.11 : 0.07), in: Circle())
+                .contentShape(Circle())
+                .appKeyboardFocus(in: Circle())
+                .scaleEffect(pressed && !SettingsMotion.reduces ? 0.9 : 1)
+                .opacity(isEnabled ? 1 : 0.4)
+                .onHover { hovered = $0 }
+                .animation(SettingsMotion.springSnappy, value: pressed)
+                .animation(SettingsMotion.quick, value: hovered)
+        }
     }
 }
 
@@ -384,7 +453,7 @@ struct SettingsActivationFeedback: ViewModifier {
     }
 }
 
-/// One persistent highlight moves between stable hit targets. AppStorage
+/// One persistent thumb moves between stable hit targets. AppStorage
 /// updates get an explicit animation rather than depending on the transaction
 /// that happened to deliver the preference notification.
 private struct SettingsSelectionTrack: View {
@@ -397,12 +466,8 @@ private struct SettingsSelectionTrack: View {
         GeometryReader { geometry in
             let width = max(0, (geometry.size.width - CGFloat(count - 1) * spacing) / CGFloat(max(1, count)))
             RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .fill(RecorderStyle.selection)
-                .overlay {
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .strokeBorder(RecorderStyle.chrome.opacity(0.12), lineWidth: 1)
-                }
-                .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
+                .fill(SettingsTheme.thumb)
+                .shadow(color: SettingsTheme.thumbShadow, radius: 3, y: 1)
                 .frame(width: width)
                 .offset(x: CGFloat(index) * (width + spacing))
                 .animation(RecorderMotion.settle, value: index)
@@ -438,10 +503,10 @@ struct SettingsSegmented<Value: Hashable & Identifiable>: View {
                             .fixedSize()
                     }
                     .modifier(AppChoiceContentFeedback())
-                    .foregroundStyle(isSelected ? SettingsTheme.textPrimary : SettingsTheme.textSecondary)
+                    .foregroundStyle(isSelected ? SettingsTheme.textPrimary
+                                     : hovered == option ? SettingsTheme.textPrimary.opacity(0.8) : SettingsTheme.textSecondary)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 36)
-                    .background(RecorderStyle.chrome.opacity(hovered == option && !isSelected ? 0.045 : 0), in: Capsule())
+                    .frame(height: 32)
                     .contentShape(Capsule())
                 }
                 .onHover { inside in
@@ -454,102 +519,11 @@ struct SettingsSegmented<Value: Hashable & Identifiable>: View {
             }
         }
         .background {
-            SettingsSelectionTrack(index: options.firstIndex(of: selection) ?? 0, count: options.count)
+            SettingsSelectionTrack(index: options.firstIndex(of: selection) ?? 0, count: options.count, radius: 16)
         }
         .padding(3)
-        .background(RecorderStyle.well, in: Capsule())
+        .background(SettingsTheme.track, in: Capsule())
         .animation(RecorderMotion.fade, value: hovered)
         .animation(RecorderMotion.fade, value: selection)
-    }
-}
-
-// MARK: - Camera Shape Choices
-
-struct SettingsCameraShapePicker: View {
-    @Binding var selection: RecordingCameraPreviewShape
-    @State private var hovered: RecordingCameraPreviewShape?
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ForEach(RecordingCameraPreviewShape.allCases) { shape in
-                AppChoiceButton(isSelected: selection == shape) {
-                    selection = shape
-                } label: {
-                    VStack(spacing: 12) {
-                        silhouette(for: shape)
-                            .frame(height: 64)
-                            .frame(maxWidth: .infinity)
-                            .modifier(AppChoiceIconFeedback())
-                        Text(shape.label)
-                            .font(.appUI(size: 12, weight: .semibold))
-                            .foregroundStyle(selection == shape ? SettingsTheme.textPrimary : SettingsTheme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .multilineTextAlignment(.center)
-                    }
-                    .modifier(AppChoiceContentFeedback())
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 14)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(RecorderStyle.chrome.opacity(hovered == shape && selection != shape ? 0.04 : 0))
-                    }
-                    .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                }
-                .onHover { inside in
-                    if inside { hovered = shape }
-                    else if hovered == shape { hovered = nil }
-                }
-                .accessibilityLabel(shape.label)
-                .accessibilityAddTraits(selection == shape ? .isSelected : [])
-                .accessibilityIdentifier("settings.camera-shape.\(shape.rawValue)")
-            }
-        }
-        .background {
-            SettingsSelectionTrack(index: RecordingCameraPreviewShape.allCases.firstIndex(of: selection) ?? 0,
-                                   count: RecordingCameraPreviewShape.allCases.count, spacing: 8, radius: 16)
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .animation(RecorderMotion.fade, value: selection)
-        .animation(RecorderMotion.fade, value: hovered)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("悬浮窗形状")
-    }
-
-    private func silhouette(for shape: RecordingCameraPreviewShape) -> some View {
-        let width: CGFloat = shape == .sourceAspect ? 76 : 56
-        let height: CGFloat = shape == .sourceAspect ? 46 : 56
-        let radius: CGFloat = shape == .circle ? 28 : shape == .roundedSquare ? 13 : 9
-        let outline = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        return outline
-            .fill(RecorderStyle.chrome.opacity(0.045))
-            .overlay {
-                AppLineIcon(kind: .person, size: 34)
-                    .foregroundStyle(RecorderStyle.chrome.opacity(selection == shape ? 0.88 : 0.38))
-            }
-            .overlay {
-                outline.strokeBorder(RecorderStyle.chrome.opacity(selection == shape ? 0.78 : 0.26), lineWidth: 1.5)
-            }
-            .frame(width: width, height: height)
-            .accessibilityHidden(true)
-    }
-}
-
-struct SettingsAppearancePicker: View {
-    @Binding var selection: AppAppearancePreference
-
-    var body: some View {
-        SettingsSegmented(
-            options: AppAppearancePreference.allCases,
-            selection: $selection,
-            label: { $0.label },
-            icon: { preference in
-                switch preference {
-                case .system: .appearance
-                case .light: .sun
-                case .dark: .moon
-                }
-            }
-        )
     }
 }

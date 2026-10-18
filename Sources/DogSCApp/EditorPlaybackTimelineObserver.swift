@@ -1,4 +1,5 @@
 import Foundation
+import QuartzCore
 
 struct EditorPlaybackTimelineSnapshot: Equatable {
     let outputTime: TimeInterval
@@ -38,6 +39,15 @@ final class EditorPlaybackTimelineObserverHub {
     }
 
     func publish(_ snapshot: EditorPlaybackTimelineSnapshot) {
+        // Observers each wrap their layer changes in a CATransaction. Called
+        // from the display link there is no enclosing transaction, so every
+        // observer's commit was a top-level commit that ran AppKit's whole
+        // display cycle over the window (measured: ~44% of the main thread
+        // during playback). One enclosing transaction makes theirs nested:
+        // the window commits once per tick.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
         var containsExpiredObserver = false
         for box in observers {
             if let observer = box.value {

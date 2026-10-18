@@ -664,14 +664,9 @@ public enum FrameSceneEvaluator {
         }
         let hasOpeningCamera = (project.media?.camera != nil || cameraSourceSize != nil)
             && !project.camera.isHidden
-        let availableOpeningElements = project.openingSequence.elementOrder.filter { element in
-            guard project.openingSequence.includedElements.contains(element) else { return false }
-            switch element {
-            case .screen: return true
-            case .camera: return hasOpeningCamera
-            case .stickers: return hasOpeningSticker
-            }
-        }
+        let availableOpeningElements = project.openingSequence.participatingElements(
+            hasCamera: hasOpeningCamera, hasOpeningSticker: hasOpeningSticker
+        )
         let screenOpening = openingSample(
             for: .screen,
             sequence: project.openingSequence,

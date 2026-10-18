@@ -20,6 +20,9 @@ extension View {
         popover(isPresented: isPresented, arrowEdge: arrowEdge) {
             EditorPopoverFocusScope(isPresented: isPresented,
                 establishesKeyboardEntry: establishesKeyboardEntry, content: content())
+                // The editor's own panel tone instead of the system's grey
+                // material, so a popover reads as a piece of the editor.
+                .presentationBackground(EditorTheme.panelSurface)
         }
     }
 }

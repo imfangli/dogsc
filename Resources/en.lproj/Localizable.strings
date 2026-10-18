@@ -183,6 +183,35 @@
 "查看自动保存失败原因" = "View Autosave Failure";
 "检查更新" = "Check for Updates";
 "正在保存项目" = "Saving Project";
+"正在保存" = "Saving";
+"没有声音" = "No audio";
+"全部" = "All";
+"预览已暂停" = "Preview paused";
+"规格" = "Format";
+"拖动边缘或四角裁切" = "Drag an edge or corner to crop";
+"拖动调节，双击输入精确数值" = "Drag to adjust, double-click to type an exact value";
+"输入精确数值" = "Enter Exact Value";
+"外圆角" = "Outer Radius";
+"摄像头描边" = "Camera Stroke";
+"摄像头阴影" = "Camera Shadow";
+"上一个样机" = "Previous Mockup";
+"下一个样机" = "Next Mockup";
+"已静音" = "Muted";
+"静音" = "Mute";
+"缩放曲线" = "Zoom Curve";
+"放大 %@，进入 %@，退出 %@" = "Zoom %@, in %@, out %@";
+"调音台" = "Mixer";
+"画面与外观" = "Frame & Appearance";
+"放大" = "Zoom";
+"画布边距" = "Canvas Padding";
+"自定义" = "Custom";
+"时序" = "Timing";
+"拖动条改变元素间隔，拖动条右端改变总时长。" = "Drag a bar to change the gap between elements; drag a bar's right end to change the total length.";
+"精确数值" = "Exact Values";
+"总时长 %@ · 间隔 %@" = "Total %@ · Gap %@";
+"间隔" = "Gap";
+"查看全部壁纸" = "Show All Wallpapers";
+"收起全部壁纸" = "Hide All Wallpapers";
 "每天检查一次；下载与安装前仍会显示确认界面。" = "Checks once per day; download and installation still require confirmation.";
 "波纹删除播放头之前（Q）" = "Ripple Delete Before Playhead (Q)";
 "波纹删除播放头之后（W）" = "Ripple Delete After Playhead (W)";
@@ -932,6 +961,7 @@
 "%@启用" = "%@ enabled";
 "第 %lld 段" = "Clip %lld";
 "让所有元素有序进入画面" = "Bring all elements into the scene in order";
+"开启后，屏幕、贴图和摄像头会按设定的顺序和节奏依次进入画面。" = "When on, the screen, stickers and camera enter one by one in your chosen order and pace.";
 "总时长" = "Total Duration";
 "元素间隔" = "Element Interval";
 "参与元素与顺序" = "Elements & Order";
@@ -1773,7 +1803,6 @@
 "服务地址" = "Service URL";
 "模型名称" = "Model Name";
 "保存配置" = "Save Configuration";
-"已保存" = "Saved";
 "API Key 保存在系统钥匙串中，不写入项目文件" = "The API key is stored in Keychain and is excluded from project files";
 "校对时会将字幕文字、参考稿和主题发送到你配置的服务" = "Proofreading sends subtitle text, your script, and the topic to your configured service";
 "校对参考" = "Proofreading Reference";
@@ -1867,3 +1896,176 @@
 "返回录制结果" = "Back to Recording";
 
 "取消关闭项目" = "Cancel closing project";
+
+/* Recorder and settings localization after the UI rebuild. */
+"原始分辨率" = "Original Resolution";
+"最高 4K" = "Up to 4K";
+"最高 1080p" = "Up to 1080p";
+"存储与引导" = "Storage & Onboarding";
+"项目目录" = "Project Folder";
+"导出目录" = "Export Folder";
+"重新开始" = "Start Again";
+"重看启动动画与功能教学" = "Replay the launch animation and feature tour";
+"外观偏好" = "Appearance";
+"画布与窗口" = "Canvas & Window";
+"编辑窗口布局" = "Editor Window Layout";
+"已恢复默认大小与位置" = "Default size and position restored";
+"悬浮人像预览" = "Floating Camera Preview";
+"屏幕录制或辅助功能尚未就绪，录制可能缺少画面或光标。" = "Screen Recording or Accessibility permission is not ready. Recordings may be missing video or cursor data.";
+"系统隐私权限" = "System Privacy Permissions";
+"悬浮窗形状" = "Floating Preview Shape";
+"开源与支持" = "Open Source & Support";
+"开源仓库 (GitHub)" = "Source Code (GitHub)";
+"反馈与建议" = "Feedback & Suggestions";
+"自愿赞赏支持" = "Support DogSC";
+"自由" = "Free";
+"应用尺寸" = "Apply Size";
+"录制区域宽度（像素）" = "Recording Area Width (Pixels)";
+"录制区域高度（像素）" = "Recording Area Height (Pixels)";
+"按 Esc 取消区域选择" = "Press Esc to cancel area selection";
+"按 Return 开始录制" = "Press Return to start recording";
+"宽高比例已锁定" = "Aspect ratio locked";
+"宽高比例未锁定" = "Aspect ratio unlocked";
+"锁定宽高比例" = "Lock Aspect Ratio";
+"已锁定" = "Locked";
+"未锁定" = "Unlocked";
+"拖动选择录制区域，按 Esc 取消" = "Drag to select a recording area. Press Esc to cancel.";
+"拖动选择录制区域" = "Drag to select an area";
+"应用窗口" = "App Window";
+"单击窗口以锁定" = "Click to Lock";
+"开始录制（窗口选择）" = "Record";
+"正在连接" = "Connecting";
+"设备已断开" = "Device Disconnected";
+"可拖动的 %@ 应用图标" = "Draggable %@ App Icon";
+"拖到系统设置的应用列表" = "Drag to the app list in System Settings";
+"最近 %.1f 秒明确丢弃 %d 帧" = "Last %.1f seconds: %d dropped frames";
+"同期成功写入 %d 帧 · 丢弃比例 %.1f%%" = "Written: %d frames · Drop rate: %.1f%%";
+"本次录制累计明确丢弃 %ld 帧" = "Dropped frames this recording: %ld";
+"继续录制" = "Resume Recording";
+"暂停录制" = "Pause Recording";
+"结束录制" = "Stop Recording";
+"目标为 %ld FPS，但显示器当前仅报告 %ld Hz；录制会保留实际帧率，不会补帧冒充。" = "The target is %ld FPS, but the display currently reports %ld Hz. Recording preserves the actual frame rate without duplicating frames.";
+"未知显示器" = "Unknown Display";
+"首帧就绪后会自动显示" = "The preview will appear when the first frame is ready";
+"当前画面保持可见，更新完成后自动切换" = "The current frame stays visible until the update is ready";
+"导出素材尚未准备完成。" = "Export media is not ready yet.";
+"请先选择导出保存位置。" = "Choose an export location first.";
+"屏幕 3D 片段" = "Screen 3D Clip";
+"动画目标" = "Animation Target";
+"关闭全局开场" = "Disable Global Opening";
+"启用全局开场" = "Enable Global Opening";
+"加入开场元素" = "Include Opening Element";
+"移出开场元素" = "Exclude Opening Element";
+"在播放头处分割（S）" = "Split at Playhead (S)";
+"把播放头移进这个片段内部后才能分割" = "Move the playhead inside this clip to split";
+"还原之前的剪切（已剪 %@）" = "Restore Previous Trim (%@ removed)";
+"还原之后的剪切（已剪 %@）" = "Restore Next Trim (%@ removed)";
+"还原开头剪切（已剪 %@）" = "Restore Start Trim (%@ removed)";
+"还原结尾剪切（已剪 %@）" = "Restore End Trim (%@ removed)";
+
+"语言与声音" = "Language & Sound";
+"界面语言" = "Interface Language";
+"简体中文" = "Simplified Chinese";
+"更改后重新打开 DogSC 生效" = "Reopen DogSC after changing the language";
+"语言已保存，重新打开 DogSC 后生效" = "Language saved. Reopen DogSC to apply it";
+"重新打开后生效" = "Reopen to apply";
+"语言已保存，重开后生效" = "Saved · reopen to apply";
+
+// Live language selection and native menu roles
+"立即生效" = "Applies immediately";
+"切换后立即生效，无需重新打开 DogSC" = "Changes apply immediately. No restart needed.";
+"关于%@" = "About %@";
+"隐藏%@" = "Hide %@";
+"隐藏其他" = "Hide Others";
+"显示全部" = "Show All";
+"服务" = "Services";
+"剪切" = "Cut";
+"拷贝" = "Copy";
+"粘贴" = "Paste";
+"全选" = "Select All";
+"最小化" = "Minimize";
+"进入全屏" = "Enter Full Screen";
+"退出全屏" = "Exit Full Screen";
+"前置所有窗口" = "Bring All to Front";
+"显示" = "View";
+
+"已开启" = "On";
+"已关闭" = "Off";
+"必需" = "Required";
+"偏好" = "Preferences";
+
+"未启用" = "Off";
+"未录制" = "Not recorded";
+
+"延后" = "Later";
+
+"提前" = "Earlier";
+
+"%@ 至 %@" = "%@ to %@";
+
+"没有元素参与开场。" = "No elements participate in the opening.";
+
+"区域效果" = "Region Effect";
+"删除突出" = "Delete Spotlight";
+"移动效果区域" = "Move Effect Region";
+"调整效果区域" = "Adjust Effect Region";
+"调整区域效果" = "Adjust Region Effect";
+"切换区域效果" = "Switch Region Effect";
+"调整效果圆角" = "Adjust Effect Corner Radius";
+"区域效果圆角" = "Region Effect Corner Radius";
+"修剪突出" = "Trim Spotlight";
+"修剪柔化" = "Trim Blur";
+"分割突出" = "Split Spotlight";
+"分割柔化" = "Split Blur";
+"删除选中的突出" = "Delete Selected Spotlight";
+"删除选中的柔化" = "Delete Selected Blur";
+"分割选中的突出" = "Split Selected Spotlight";
+"分割选中的柔化" = "Split Selected Blur";
+"在播放头处分割选中的突出（S）" = "Split the selected spotlight at the playhead (S)";
+"在播放头处分割选中的柔化（S）" = "Split the selected blur at the playhead (S)";
+
+"选区" = "Selection";
+"音频" = "Audio";
+"成片" = "Video";
+
+"开启后各元素按顺序依次入场。" = "When on, elements enter one after another.";
+"从 0 秒开始的贴图由开场统一入场。" = "Stickers that start at 0s enter with the opening.";
+"预览和导出都不显示光标。" = "The cursor is hidden in preview and export.";
+"摄像头已隐藏，可在播放头添加出现动画。" = "Camera hidden. You can add an appear animation at the playhead.";
+"只移动蒙版内的画面，蒙版不动。" = "Moves the picture inside the mask; the mask stays.";
+"在播放头创建或更新布局动画" = "Create or update a layout animation at the playhead";
+"声音先于口型时点“提前”，每次调整自动试听。" = "If the sound leads the lips, choose Earlier. Each change plays back automatically.";
+"先在错位前固定，再到错位后调整，中间自动平滑。" = "Pin before the drift, adjust after it; the span between is smoothed.";
+"录屏已隐藏，只保留画布自身的壁纸模糊。" = "Recording hidden; only the canvas wallpaper blur remains.";
+"隐藏与虚化随贴图出入场渐变。" = "Hiding and blur follow the sticker's entrance and exit.";
+"支持图片和 MOV/MP4，视频循环播放。" = "Images and MOV/MP4; videos loop.";
+"展开轨道名称" = "Show Track Names";
+"收起轨道名称" = "Hide Track Names";
+
+"拖动录制条" = "Drag Recording Bar";
+
+/* Concise inspector labels and input hints. */
+"旋转或滚动 · Shift 精调" = "Rotate or scroll · Shift: fine";
+"启用开场" = "Enable Opening";
+"方式" = "Style";
+"节奏" = "Feel";
+"数值" = "Values";
+"元素与顺序" = "Elements & Order";
+"预览开场" = "Preview Opening";
+"拖动调时长" = "Drag: duration";
+"拖动调间隔 · 右端调时长" = "Drag: spacing · End: duration";
+"正值提前，负值延后" = "Positive: earlier · Negative: later";
+"声音先到：画面提前" = "Audio first: advance video";
+"错位前固定，错位后调整" = "Anchor before drift; adjust after";
+"原地淡出" = "Fade Out";
+"启用" = "Enable";
+"无参与元素" = "No participants";
+"应用倍率到全部缩放" = "Apply scale to all zooms";
+"启用线性虚化" = "Enable Linear Blur";
+"拖动调节 · 双击输入" = "Drag to adjust · Double-click to type";
+
+/* Editor persistence status. */
+"已保存" = "Saved";
+"编辑中" = "Editing";
+"项目已自动保存" = "Project Saved";
+"正在编辑项目" = "Editing Project";

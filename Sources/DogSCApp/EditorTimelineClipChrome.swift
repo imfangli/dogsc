@@ -21,8 +21,8 @@ enum EditorTimelineClipEmphasis: Equatable {
 
     var strokeOpacity: Double {
         switch self {
-        case .idle: 0.14
-        case .hovered: 0.38
+        case .idle: 0.08
+        case .hovered: 0.30
         case .selected: 0.90
         case .editing: 1
         }
@@ -33,64 +33,97 @@ enum EditorTimelineClipEmphasis: Equatable {
         case .idle: 0.65
         case .hovered: 0.9
         case .selected: 1.45
-        case .editing: 2
+        case .editing: 1.5
         }
     }
 
     var handleOpacity: Double {
         switch self {
         case .idle: 0
-        case .hovered: 0.58
-        case .selected: 0.88
-        case .editing: 1
+        case .hovered, .selected, .editing: 1
+        }
+    }
+
+    /// Track-colour wash for effect clips (light appearance).
+    var trackLightFillOpacity: Double {
+        switch self {
+        case .idle: 0.26
+        case .hovered: 0.34
+        case .selected: 0.46
+        case .editing: 0.50
+        }
+    }
+
+    /// Track-colour wash for effect clips (dark appearance).
+    var trackDarkFillOpacity: Double {
+        switch self {
+        case .idle: 0.22
+        case .hovered: 0.30
+        case .selected: 0.40
+        case .editing: 0.44
+        }
+    }
+
+    /// The primary recording card stays neutral graphite.
+    var primaryNeutralFillOpacity: Double {
+        switch self {
+        case .idle: 0.035
+        case .hovered: 0.05
+        case .selected: 0.065
+        case .editing: 0.07
         }
     }
 
     var showsHandles: Bool { self != .idle }
 
-    var shadowOpacity: Double {
-        switch self {
-        case .idle, .hovered: 0
-        case .selected: 0.055
-        case .editing: 0.09
-        }
+}
+
+extension EditorConsolePalette {
+    /// Effect clips (`缩放`, `屏幕 3D`, `摄像运动`, `叠加`) wear their track's
+    /// colour: the track icon, every clip in that row, its outline, handles
+    /// and label share one hue, so a row reads as one track at a glance.
+    func timelineSurface(_ emphasis: EditorTimelineClipEmphasis) -> Color {
+        adaptiveWash(
+            lightAlpha: emphasis.trackLightFillOpacity,
+            darkAlpha: emphasis.trackDarkFillOpacity
+        )
     }
 
-    var shadowRadius: CGFloat {
-        switch self {
-        case .idle, .hovered: 0
-        case .selected: 3
-        case .editing: 6
-        }
+    /// The primary recording card (`屏幕录制`) is neutral: the filmstrip and
+    /// waveform are the content, and black is the editor's primary colour.
+    func primaryTimelineSurface(_ emphasis: EditorTimelineClipEmphasis) -> Color {
+        EditorTheme.chrome(emphasis.primaryNeutralFillOpacity)
     }
 }
 
 extension View {
+    /// `tint` is the track colour: a soft same-hue outline at rest and a
+    /// solid 1.5pt ring when selected. Without a tint (the neutral recording
+    /// clip) the rest outline is a graphite hairline and `selectionRing`
+    /// colours only the selected ring. No glow or drawing outside the clip.
     func editorTimelineClipChrome(
         cornerRadius: CGFloat,
-        emphasis: EditorTimelineClipEmphasis
+        emphasis: EditorTimelineClipEmphasis,
+        tint: Color? = nil,
+        selectionRing: Color? = nil
     ) -> some View {
-        overlay {
+        let ring = tint ?? selectionRing ?? EditorTheme.selectionTint
+        let active = emphasis == .selected || emphasis == .editing
+        let restOpacity = tint == nil
+            ? (emphasis == .hovered ? 0.2 : 0.1)
+            : (emphasis == .hovered ? 0.7 : 0.45)
+        return overlay {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .strokeBorder(
-                    emphasis == .selected || emphasis == .editing
-                        ? EditorTheme.selectionTint
-                        : EditorTheme.chrome(),
-                    lineWidth: emphasis.strokeWidth
+                    active ? ring : (tint ?? EditorTheme.chrome()),
+                    lineWidth: active ? 1.5 : 0.75
                 )
-                // Animate only the ink. Animating the whole clip here also
-                // springs its new bounds when a split, trim or drop changes
-                // geometry in the same update as selection/emphasis.
-                .animation(.easeOut(duration: 0.12)) { border in
-                    border.opacity(emphasis == .selected || emphasis == .editing
-                        ? 0.65 : emphasis.strokeOpacity)
+                // Only the ink fades; geometry and media stay at their exact
+                // edit positions, including selection changes during a cut.
+                .animation(.easeOut(duration: 0.14)) { border in
+                    border.opacity(active ? 1 : restOpacity)
                 }
                 .allowsHitTesting(false)
         }
-        .shadow(
-            color: Color.black.opacity(emphasis.shadowOpacity),
-            radius: emphasis.shadowRadius,
-            y: emphasis == .editing ? 2 : 1
-        )
     }
 }

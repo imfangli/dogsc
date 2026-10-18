@@ -9,30 +9,29 @@ private struct CanvasQuickEditorPlacement {
 
 private struct CanvasQuickControlSurface: ViewModifier {
     var isSelected = false
+    @Environment(\.consolePalette) private var palette
     @State private var isHovered = false
 
     func body(content: Content) -> some View {
         content
-        .font(.appUI(size: 11, weight: .medium))
-        .foregroundStyle(EditorTheme.primaryText)
+        .font(.appUI(size: 12, weight: .medium))
+        .foregroundStyle(isSelected ? (palette?.ink ?? EditorTheme.primaryText) : EditorTheme.chrome(isHovered ? 0.82 : 0.62))
         .lineLimit(1)
         .fixedSize(horizontal: true, vertical: false)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 10)
         .frame(height: 30)
-        .background(
-            EditorTheme.chrome(isSelected ? 0.08 : (isHovered ? 0.045 : 0.015)),
-            in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous)
-                .strokeBorder(
-                    EditorTheme.chrome(isSelected ? 0.16 : (isHovered ? 0.12 : 0.055)),
-                    lineWidth: 0.75
-                )
+        // Same grammar as every capsule toolbar: the current choice is the
+        // raised thumb, hover is a flat wash of the same capsule.
+        .background {
+            if isSelected {
+                EditorRaisedThumb(shape: Capsule(style: .continuous))
+            } else {
+                Capsule(style: .continuous).fill(EditorTheme.chrome(isHovered ? EditorStateWash.hover : 0))
+            }
         }
-        .contentShape(RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous))
+        .contentShape(Capsule(style: .continuous))
         .onHover { hovering in
-            withAnimation(SpringMotion.interactive) {
+            withAnimation(SpringMotion.hover) {
                 isHovered = hovering
             }
         }
@@ -45,8 +44,8 @@ private struct CanvasQuickMenuLabel: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Label(appLocalized(title), systemImage: systemImage)
-            Image(systemName: "chevron.down")
+            EditorSymbolLabel(appLocalized(title), systemImage: systemImage)
+            EditorSymbol("chevron.down", size: 10.5)
                 .font(.appUI(size: 8, weight: .bold))
                 .foregroundStyle(EditorTheme.secondaryText)
         }
@@ -147,11 +146,11 @@ extension CanvasPreview {
             ("柔化", 11), ("突出", 11),
             (clip.style == .spotlight ? "暗度" : "强度", 10), ("圆角", 10),
         ]
-        return localizedQuickEditorPreferredWidth(baseWidth: 420, labels: labels)
+        return localizedQuickEditorPreferredWidth(baseWidth: 436, labels: labels)
     }
 
     private func stickerQuickEditorPreferredWidth(_ clip: StickerClip) -> CGFloat {
-        localizedQuickEditorPreferredWidth(baseWidth: 324, labels: [
+        localizedQuickEditorPreferredWidth(baseWidth: 334, labels: [
             (stickerAnimationTitle(clip.animation), 11), ("虚化", 10), ("仅背景", 11),
         ])
     }
@@ -174,27 +173,32 @@ extension CanvasPreview {
     func mosaicQuickEditor(_ clip: MosaicClip, width: CGFloat) -> some View {
         quickEditorCard(width: width) {
             HStack(spacing: 8) {
-                quickToggle(
-                    title: "柔化",
-                    symbol: "drop.halffull",
-                    isSelected: clip.style == .blur
-                ) {
-                    replaceMosaic(id: clip.id, actionName: "切换柔化模式") {
-                        $0.style = .blur
+                // The two modes are one choice: a pair in a single groove.
+                HStack(spacing: 2) {
+                    quickToggle(
+                        title: "柔化",
+                        symbol: "drop.halffull",
+                        isSelected: clip.style == .blur
+                    ) {
+                        replaceMosaic(id: clip.id, actionName: "切换区域效果") {
+                            $0.style = .blur
+                        }
+                    }
+                    quickToggle(
+                        title: "突出",
+                        symbol: "viewfinder",
+                        isSelected: clip.style == .spotlight
+                    ) {
+                        replaceMosaic(id: clip.id, actionName: "切换区域效果") {
+                            $0.style = .spotlight
+                        }
                     }
                 }
-                quickToggle(
-                    title: "突出",
-                    symbol: "viewfinder",
-                    isSelected: clip.style == .spotlight
-                ) {
-                    replaceMosaic(id: clip.id, actionName: "切换柔化模式") {
-                        $0.style = .spotlight
-                    }
-                }
-                Divider().frame(height: 22)
+                .padding(2)
+                .background(EditorChoiceStyle.track, in: Capsule(style: .continuous))
+                Color.clear.frame(width: 6, height: 22)
                 let editsSpotlight = clip.style == .spotlight
-                Label(
+                EditorSymbolLabel(
                     appLocalized(editsSpotlight ? "暗度" : "强度"),
                     systemImage: "circle.lefthalf.filled"
                 )
@@ -227,8 +231,8 @@ extension CanvasPreview {
                 .accessibilityValue(
                     "\(Int(((editsSpotlight ? clip.spotlightDimming : clip.intensity) * 100).rounded()))%"
                 )
-                Divider().frame(height: 22)
-                Label("圆角", systemImage: "square")
+                Color.clear.frame(width: 6, height: 22)
+                EditorSymbolLabel("圆角", systemImage: "square")
                     .font(.appUI(size: 10, weight: .medium))
                     .foregroundStyle(EditorTheme.secondaryText)
                     .fixedSize(horizontal: true, vertical: false)
@@ -243,12 +247,12 @@ extension CanvasPreview {
                     onEditingChanged: { editing in
                         finishQuickOverlayInteraction(
                             editing: editing,
-                            actionName: "调整柔化圆角"
+                            actionName: "调整效果圆角"
                         )
                     }
                 )
                 .frame(minWidth: 36, maxWidth: 70)
-                .accessibilityLabel("柔化区域圆角")
+                .accessibilityLabel(appLocalized("区域效果圆角"))
                 .accessibilityValue("\(Int((clip.cornerRadius * 100).rounded()))%")
             }
         }
@@ -270,8 +274,8 @@ extension CanvasPreview {
                 .help("选择贴图动画")
                 .accessibilityLabel("贴图动画")
                 .accessibilityValue(appLocalized(stickerAnimationTitle(clip.animation)))
-                Divider().frame(height: 22)
-                Label("虚化", systemImage: "drop.halffull")
+                Color.clear.frame(width: 6, height: 22)
+                EditorSymbolLabel("虚化", systemImage: "drop.halffull")
                     .font(.appUI(size: 10, weight: .medium))
                     .foregroundStyle(EditorTheme.secondaryText)
                     .fixedSize(horizontal: true, vertical: false)
@@ -300,7 +304,7 @@ extension CanvasPreview {
                         ? appLocalized("仅背景模式下不可用")
                         : String(format: "%.0f", clip.backdropBlur)
                 )
-                Divider().frame(height: 22)
+                Color.clear.frame(width: 6, height: 22)
                 quickToggle(
                     title: "仅背景",
                     symbol: "rectangle.slash",
@@ -328,23 +332,16 @@ extension CanvasPreview {
         width: CGFloat? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
+        // Mosaics and stickers share the overlay colour: the chosen mode and
+        // the sliders' filled run carry it instead of default black.
         content()
             .font(.appUI(size: 11, weight: .medium))
-            .padding(.horizontal, 11)
-            .frame(width: width, height: 48)
+            .padding(.horizontal, 8)
+            .frame(width: width, height: 44)
             .foregroundStyle(EditorTheme.primaryText)
-            .background(
-                EditorTheme.cardElevated,
-                in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.group, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: EditorInterfaceRadius.group, style: .continuous)
-                    .strokeBorder(
-                        EditorTheme.controlBorder,
-                        lineWidth: 0.75
-                    )
-            }
-            .shadow(color: EditorTheme.softShadow, radius: 8, y: 3)
+            .environment(\.consolePalette, EditorConsole.opening)
+            .editorCapsuleIsland()
+            .frame(height: 48)
     }
 
     func quickToggle(
@@ -358,11 +355,11 @@ extension CanvasPreview {
                 action()
             }
         } label: {
-            Label(appLocalized(title), systemImage: symbol)
+            EditorSymbolLabel(appLocalized(title), systemImage: symbol)
                 .modifier(CanvasQuickControlSurface(isSelected: isSelected))
         }
-        .buttonStyle(EditorToolbarPressButtonStyle(cornerRadius: EditorInterfaceRadius.compact, showsHover: false))
-        .animation(SpringMotion.interactive, value: isSelected)
+        .buttonStyle(EditorToolbarPressButtonStyle(showsHover: false))
+        .animation(SpringMotion.settle, value: isSelected)
         .accessibilityLabel(appLocalized(title))
         .accessibilityValue(appLocalized(isSelected ? "已选择" : "未选择"))
         .accessibilityAddTraits(isSelected ? .isSelected : [])

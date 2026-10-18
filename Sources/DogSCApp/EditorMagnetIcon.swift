@@ -1,25 +1,12 @@
 import SwiftUI
 
-/// A real vector glyph: "magnet" is unavailable in some supported SF Symbols versions.
+/// The snapping glyph, drawn on the same 18 pt line grid as every other
+/// editor icon (it used to be a heavier filled shape).
 struct EditorMagnetIcon: View {
     var body: some View {
-        Canvas { context, size in
-            let w = size.width, h = size.height
-            var path = Path()
-            path.move(to: CGPoint(x: w * 0.22, y: h * 0.14))
-            path.addLine(to: CGPoint(x: w * 0.22, y: h * 0.54))
-            path.addCurve(to: CGPoint(x: w * 0.78, y: h * 0.54),
-                control1: CGPoint(x: w * 0.22, y: h * 0.98),
-                control2: CGPoint(x: w * 0.78, y: h * 0.98))
-            path.addLine(to: CGPoint(x: w * 0.78, y: h * 0.14))
-            context.stroke(path, with: .foreground, style: StrokeStyle(lineWidth: max(w * 0.18, 1.5), lineCap: .round))
-            var ends = Path()
-            for x in [0.22, 0.78] {
-                ends.move(to: CGPoint(x: w * (x - 0.09), y: h * 0.34))
-                ends.addLine(to: CGPoint(x: w * (x + 0.09), y: h * 0.34))
-            }
-            context.blendMode = .destinationOut
-            context.stroke(ends, with: .color(.white), lineWidth: max(w * 0.055, 0.7))
+        GeometryReader { proxy in
+            AppLineIcon(kind: .magnet, size: min(proxy.size.width, proxy.size.height) * 1.15)
+                .frame(width: proxy.size.width, height: proxy.size.height)
         }
         .accessibilityHidden(true)
     }

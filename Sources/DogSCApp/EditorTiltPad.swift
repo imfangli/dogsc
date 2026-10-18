@@ -5,6 +5,7 @@ import SwiftUI
 /// the same surface and share its draft/commit lifecycle.
 struct EditorTiltPad: View {
     @GestureState private var isDragging = false
+    @Environment(\.consolePalette) private var palette
     @State private var isAngleEditing = false
 
     let rotationX: Double
@@ -14,6 +15,8 @@ struct EditorTiltPad: View {
     let onCancelled: () -> Void
     var onTextPreviewValidityChanged: (Bool) -> Void = { _ in }
 
+    private var tint: Color { palette?.fill ?? EditorTheme.platinumAccent }
+
     private let maximumX = 28.0
     private let maximumY = 32.0
 
@@ -22,11 +25,8 @@ struct EditorTiltPad: View {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("3D 倾斜")
-                        .font(.appUI(.caption, weight: .semibold))
+                        .font(.appUI(size: 11, weight: .semibold))
                         .foregroundStyle(EditorTheme.chrome(0.84))
-                    Text("上下控制 X · 左右控制 Y")
-                        .font(.appUI(size: 9.5, weight: .medium))
-                        .foregroundStyle(EditorTheme.chrome(0.38))
                 }
 
                 Spacer(minLength: 8)
@@ -37,8 +37,8 @@ struct EditorTiltPad: View {
                         onEnded()
                     }
                 } label: {
-                    Label("归零", systemImage: "scope")
-                        .font(.appUI(.caption2, weight: .semibold))
+                    EditorSymbolLabel("归零", systemImage: "scope")
+                        .font(.appUI(size: 10, weight: .semibold))
                 }
                 .buttonStyle(.editorGhost)
                 .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous))
@@ -55,7 +55,7 @@ struct EditorTiltPad: View {
                     accessibilityTitle: "3D 倾斜 X 角度",
                     value: clamped(rotationX, to: -maximumX...maximumX),
                     range: -maximumX...maximumX,
-                    displayText: String(format: "%.1f°", rotationX),
+                    displayText: EditorSliderValueFormat.compact(rotationX, unit: "°", digits: 1),
                     inputFormat: .decimal1
                 ),
                 second: EditorPairedParameterValue(
@@ -63,7 +63,7 @@ struct EditorTiltPad: View {
                     accessibilityTitle: "3D 倾斜 Y 角度",
                     value: clamped(rotationY, to: -maximumY...maximumY),
                     range: -maximumY...maximumY,
-                    displayText: String(format: "%.1f°", rotationY),
+                    displayText: EditorSliderValueFormat.compact(rotationY, unit: "°", digits: 1),
                     inputFormat: .decimal1
                 ),
                 onChanged: onChanged,
@@ -97,7 +97,7 @@ struct EditorTiltPad: View {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .stroke(
                                 active
-                                    ? EditorTheme.platinumAccent.opacity(0.22)
+                                    ? tint.opacity(0.22)
                                     : EditorTheme.chrome(0.075),
                                 lineWidth: 0.75
                             )
@@ -107,7 +107,7 @@ struct EditorTiltPad: View {
                     .fill(
                         LinearGradient(
                             colors: [
-                                EditorTheme.platinumAccent.opacity(0.11),
+                                tint.opacity(0.11),
                                 EditorTheme.chrome(0.025),
                             ],
                             startPoint: .topLeading,
@@ -120,7 +120,7 @@ struct EditorTiltPad: View {
                                 LinearGradient(
                                     colors: [
                                         EditorTheme.chrome(0.34),
-                                        EditorTheme.platinumAccent.opacity(0.10),
+                                        tint.opacity(0.10),
                                     ],
                                     startPoint: .top,
                                     endPoint: .bottom
@@ -149,7 +149,7 @@ struct EditorTiltPad: View {
                     path.addLine(to: CGPoint(x: proxy.size.width - inset, y: proxy.size.height / 2))
                 }
                 .stroke(
-                    EditorTheme.platinumAccent.opacity(0.13),
+                    tint.opacity(0.13),
                     style: StrokeStyle(lineWidth: 0.75, dash: [3, 4])
                 )
                 .allowsHitTesting(false)
@@ -162,7 +162,7 @@ struct EditorTiltPad: View {
                         path.addLine(to: CGPoint(x: proxy.size.width - inset, y: point.y))
                     }
                     .stroke(
-                        EditorTheme.platinumAccent.opacity(0.27),
+                        tint.opacity(0.27),
                         style: StrokeStyle(lineWidth: 0.75, dash: [2.5, 3.5])
                     )
                     .allowsHitTesting(false)
@@ -170,16 +170,10 @@ struct EditorTiltPad: View {
 
                 ZStack {
                     Circle()
-                        .fill(EditorTheme.platinumAccent.opacity(active ? 0.20 : 0.09))
+                        .fill(tint.opacity(active ? 0.20 : 0.09))
                         .frame(width: active ? 28 : 24, height: active ? 28 : 24)
                     Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [EditorTheme.platinumAccent, EditorTheme.platinumAccent],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
+                        .fill(tint)
                         .frame(width: active ? 16 : 14, height: active ? 16 : 14)
                         .overlay {
                             Circle().stroke(EditorTheme.chrome(0.78), lineWidth: 0.75)

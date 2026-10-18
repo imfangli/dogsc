@@ -2,19 +2,16 @@ import AppKit
 import RecorderCore
 import SwiftUI
 
-// 全局视觉基线收口到同一套暖石墨硬件语言。不用蓝紫做界面强调，
-// 颜色优先表达录制、警告与时间线内容身份。
+// 全局表面跟随统一明暗外观；内容身份色与侧栏任务调色板同源。
 let appBackground = EditorTheme.backgroundDeep
 let panelBackground = EditorTheme.panelSurface
 let dividerColor = EditorTheme.hairline
-/// 全编辑器唯一交互强调色：米白。滑块、开关、选中态、主动作按钮共用。
+/// 中性控件的基础强调色；任务控件使用各自的 EditorConsole 调色板。
 let editorAccent = EditorTheme.platinumAccent
-/// 内容色：缩放/运镜片段的板岩蓝（不是界面强调色，只是该轨道的身份色）。
-let editorZoomClip = Color(red: 0.58, green: 0.48, blue: 0.34)
-let editorCameraSyncClip = Color(red: 0.34, green: 0.56, blue: 0.47)
-let editorOverlayClip = Color(red: 0.58, green: 0.37, blue: 0.31)
-/// 内容色：主片段的经典暖琥珀橙（Orange + White 标志性主片段风格）。
-let editorClipAmberTop = Color(red: 0.82, green: 0.56, blue: 0.22)
+/// 缩放／屏幕运镜片段的身份色。
+let editorZoomClip = EditorTheme.timelineZoomAccent
+let editorCameraSyncClip = EditorConsole.Track.cameraSync.fill
+let editorOverlayClip = EditorConsole.Track.overlay.fill
 
 func setupWindowWidth() -> CGFloat { 714 }
 func recordingWindowWidth(recordsMicrophone: Bool) -> CGFloat {
@@ -34,9 +31,9 @@ struct RecordingQualityWarningPresentation: Equatable, Sendable {
             recentDroppedFramesText,
             recentWriteHealthText,
             droppedFramesText,
-            "这是画面写入提示，与麦克风录音无关。",
+            appLocalized("这是画面写入提示，与麦克风录音无关。"),
         ]
-            .joined(separator: "；")
+            .joined(separator: appLocalized("；"))
     }
 
     static func make(
@@ -48,18 +45,18 @@ struct RecordingQualityWarningPresentation: Equatable, Sendable {
         let recentTotal = max(recentWrittenFrames + recentDroppedFrames, 1)
         let dropRatio = Double(recentDroppedFrames) / Double(recentTotal)
         return Self(
-            title: "画面写入出现丢帧",
+            title: appLocalized("画面写入出现丢帧"),
             recentDroppedFramesText: String(
-                format: "最近 %.1f 秒明确丢弃 %d 帧",
+                format: appLocalized("最近 %.1f 秒明确丢弃 %d 帧"),
                 max(recentElapsed, 0),
                 recentDroppedFrames
             ),
             recentWriteHealthText: String(
-                format: "同期成功写入 %d 帧 · 丢弃比例 %.1f%%",
+                format: appLocalized("同期成功写入 %d 帧 · 丢弃比例 %.1f%%"),
                 recentWrittenFrames,
                 dropRatio * 100
             ),
-            droppedFramesText: "本次录制累计明确丢弃 \(totalDroppedFrames) 帧"
+            droppedFramesText: String(format: appLocalized("本次录制累计明确丢弃 %ld 帧"), totalDroppedFrames)
         )
     }
 }
@@ -197,6 +194,7 @@ struct RecordingBar: View {
         HStack(spacing: 0) {
             recordingStatus
             recordingActions
+            RecorderDragGrip()
         }
         .padding(.leading, 16).padding(.trailing, 6)
         .frame(height: 48)
@@ -338,7 +336,7 @@ struct RecordingBar: View {
     private func recordingActionButton(icon: String, accessibilityLabel: String,
         accessibilityIdentifier: String, isEnabled: Bool = true,
         action: @escaping () -> Void) -> some View {
-        RecorderNativeActionButton(accessibilityLabel: accessibilityLabel,
+        RecorderNativeActionButton(accessibilityLabel: appLocalized(accessibilityLabel),
             accessibilityIdentifier: accessibilityIdentifier, isEnabled: isEnabled,
             width: 36, height: 36, cornerRadius: 18, highlightOpacity: 0.05, action: action) {
             Image(systemName: icon).font(.system(size: 13, weight: .semibold))

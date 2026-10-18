@@ -23,7 +23,7 @@ struct EditorAppearanceToggleButton: View {
                 .transition(reducesMotion ? .opacity : .asymmetric(
                     insertion: .scale(scale: 0.6).combined(with: .opacity),
                     removal: .scale(scale: 1.3).combined(with: .opacity)))
-                .animation(RecorderMotion.settle ?? .easeOut(duration: 0.18), value: isDark)
+                .animation(SpringMotion.settle ?? .easeOut(duration: 0.18), value: isDark)
         }
         .buttonStyle(EditorToolbarPressButtonStyle(cornerRadius: 16))
         .help(actionTitle)

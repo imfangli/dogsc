@@ -237,6 +237,23 @@ public struct OpeningSequence: Codable, Equatable, Sendable {
         )
     }
 
+    /// Keep the opening roster stable for its whole duration. Only stickers
+    /// present at the first frame participate, even if others appear later.
+    public func availableElements(hasCamera: Bool, hasOpeningSticker: Bool) -> [OpeningSequenceElement] {
+        elementOrder.filter { element in
+            switch element {
+            case .screen: true
+            case .camera: hasCamera
+            case .stickers: hasOpeningSticker
+            }
+        }
+    }
+
+    public func participatingElements(hasCamera: Bool, hasOpeningSticker: Bool) -> [OpeningSequenceElement] {
+        availableElements(hasCamera: hasCamera, hasOpeningSticker: hasOpeningSticker)
+            .filter { includedElements.contains($0) }
+    }
+
     public mutating func normalizeTiming() {
         duration = min(max(duration.isFinite ? duration : 2.2, 0.4), 8)
         let maximum = maximumStagger(for: includedElements.count)

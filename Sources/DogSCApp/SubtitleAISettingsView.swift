@@ -11,7 +11,7 @@ struct SubtitleAIConfigurationEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            SettingsCard("AI 校对接口", footer: "API Key 保存在系统钥匙串中，不写入项目文件") {
+            settingsGroup("AI 校对接口", footer: "API Key 保存在系统钥匙串中，不写入项目文件") {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(appLocalized("配置 OpenAI 兼容接口，用于字幕校对"))
                         .font(.appUI(size: 13)).foregroundStyle(SettingsTheme.textSecondary)
@@ -31,7 +31,7 @@ struct SubtitleAIConfigurationEditor: View {
                 .padding(18)
             }
 
-            SettingsCard(footer: "测试只发送一条简短请求，不发送字幕或口播稿") {
+            settingsGroup(footer: "测试只发送一条简短请求，不发送字幕或口播稿") {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 8) {
                         Button(appLocalized("保存配置")) {
@@ -92,6 +92,22 @@ struct SubtitleAIConfigurationEditor: View {
         }
         .onDisappear { cancelConnectionTest() }
         .accessibilityIdentifier("settings.subtitle-ai")
+    }
+
+    private func settingsGroup<Content: View>(
+        _ title: String? = nil,
+        footer: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let title { SettingsCaption(title) }
+            content().settingsTile()
+            Text(appLocalized(footer))
+                .font(EditorTypography.helper)
+                .foregroundStyle(SettingsTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 8)
+        }
     }
 
     private func testConnection() {

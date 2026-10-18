@@ -4,6 +4,7 @@ import SwiftUI
 /// NSTextView supplies IME, plain-text paste, native undo and smooth scrolling.
 /// Updating settings never replaces text or selection during marked-text input.
 struct RecorderMemoTextView: NSViewRepresentable {
+    @Environment(\.locale) private var locale
     @Binding var text: String
     let fontSize: Double
     let isEditing: Bool
@@ -56,9 +57,11 @@ struct RecorderMemoTextView: NSViewRepresentable {
         return scroll
     }
     func updateNSView(_ scroll: NSScrollView, context: Context) {
+        _ = locale
         context.coordinator.text = $text
         context.coordinator.selectedRange = $selectedRange
         guard let view = scroll.documentView as? NSTextView else { return }
+        view.setAccessibilityLabel(appLocalized("备忘录文稿"))
         context.coordinator.isApplyingViewUpdate = true
         defer { context.coordinator.isApplyingViewUpdate = false }
         view.isEditable = isEditing

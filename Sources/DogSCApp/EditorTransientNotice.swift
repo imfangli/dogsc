@@ -27,10 +27,11 @@ struct EditorTransientNotice: View {
         let lifetime = min(max(Double(text.detail.count) * 0.08, 5), 10)
         VStack(spacing: 12) {
             HStack(alignment: .top, spacing: 11) {
-                Image(systemName: "info.circle")
-                    .font(.appUI(size: 18, weight: .regular))
-                    .foregroundStyle(EditorTheme.platinumMuted)
-                    .frame(width: 28, height: 28)
+                EditorSymbol("info", size: 17)
+                    .font(.appUI(size: 13, weight: .semibold))
+                    .foregroundStyle(EditorTheme.primaryText.opacity(0.85))
+                    .frame(width: 30, height: 30)
+                    .background(EditorTheme.chrome(0.06), in: Circle())
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(text.title).font(.appUI(size: 13, weight: .semibold))
@@ -41,28 +42,25 @@ struct EditorTransientNotice: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 Button(action: dismiss) {
-                    Image(systemName: "xmark").font(.appUI(size: 10, weight: .medium))
-                        .foregroundStyle(EditorTheme.chrome(0.44))
-                        .frame(width: 22, height: 22).contentShape(Rectangle())
+                    EditorSymbol("xmark", size: 12.5).font(.appUI(size: 10, weight: .semibold))
                 }
-                .buttonStyle(.plain)
-                .appKeyboardFocus(in: RoundedRectangle(cornerRadius: 4))
+                .buttonStyle(.editorDismissIcon(size: 24))
                 .help("关闭提示")
                 .accessibilityLabel("关闭提示")
             }
             GeometryReader { geometry in
                 Capsule().fill(EditorTheme.chrome(0.045))
-                Capsule().fill(EditorTheme.chrome(0.20))
+                Capsule().fill(LinearGradient(colors: [EditorTheme.chrome(0.12), EditorTheme.chrome(0.32)],
+                                              startPoint: .leading, endPoint: .trailing))
                     .frame(width: geometry.size.width * remaining)
             }
             .frame(height: 2)
+            .padding(.leading, 41)
             .accessibilityHidden(true)
         }
         .padding(14)
         .frame(width: 352)
-        .background(EditorTheme.cardElevated, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 15).strokeBorder(EditorTheme.chrome(0.085), lineWidth: 1) }
-        .shadow(color: EditorTheme.softShadow, radius: 12, y: 5)
+        .modifier(EditorFloatingSurface(cornerRadius: 16))
         .appControlFocusAppearance()
         .accessibilityElement(children: .contain)
         .accessibilityLabel(text.title + "：" + text.detail)

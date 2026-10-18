@@ -4,28 +4,32 @@ private struct TimelineTrackManagerLabel: View {
     @State private var isHovered = false
     let isPresented: Bool
     var horizontalInset: CGFloat = 16
+    var collapsed = false
 
     var body: some View {
         return HStack(spacing: 8) {
-            Image(systemName: "rectangle.stack")
+            EditorSymbol("rectangle.stack", size: 15.5)
                 .font(.appUI(size: 12, weight: .medium))
                 .frame(width: 20)
                 .accessibilityHidden(true)
-            Text("轨道")
-                .font(.appUI(size: 11, weight: .medium))
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: isPresented ? "chevron.up" : "chevron.down")
-                .font(.appUI(size: 8, weight: .medium))
-                .frame(width: 24)
-                .foregroundStyle(EditorTheme.chrome(isHovered || isPresented ? 0.82 : 0.46))
-                .accessibilityHidden(true)
+            if !collapsed {
+                Text("轨道")
+                    .font(.appUI(size: 11, weight: .medium))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                EditorSymbol(isPresented ? "chevron.up" : "chevron.down", size: 10.5)
+                    .font(.appUI(size: 8, weight: .medium))
+                    .frame(width: 24)
+                    .foregroundStyle(EditorTheme.chrome(isHovered || isPresented ? 0.82 : 0.46))
+                    .accessibilityHidden(true)
+            }
         }
         .foregroundStyle(EditorTheme.chrome(isHovered || isPresented ? 0.96 : 0.74))
-        .padding(.horizontal, horizontalInset)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, collapsed ? 16 : horizontalInset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .clipped()
         .background(
-            EditorTheme.chrome(isPresented ? 0.105 : isHovered ? 0.075 : 0),
+            EditorTheme.chrome(isPresented ? EditorStateWash.open : isHovered ? EditorStateWash.hover : 0),
             in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous)
         )
         .overlay {
@@ -97,18 +101,30 @@ extension EditorTimelineView {
         let visibleWidth = measuredVisibleWidth > 1
             ? measuredVisibleWidth
             : min(max(documentWidth, 1), 1_200)
-        return HStack(spacing: 8) {
-            Image(systemName: "plus")
-                .font(.appUI(size: 12, weight: .medium))
-                .foregroundStyle(EditorTheme.chrome(0.38))
-                .frame(width: 20, height: 20)
+        return HStack(spacing: 7) {
+            EditorSymbol("plus", size: 13.5)
+                .font(.appUI(size: 11, weight: .semibold))
+                .foregroundStyle(EditorTheme.chrome(0.40))
 
             Text(appLocalized(title))
                 .font(.appUI(size: 12, weight: .medium))
-                .foregroundStyle(EditorTheme.chrome(0.46))
+                .foregroundStyle(EditorTheme.chrome(0.48))
                 .lineLimit(1)
         }
-        .padding(.leading, layout.value(regular: 24, compact: 20))
+        .padding(.horizontal, 13)
+        .frame(height: 28)
+        .background {
+            // A recessed drop slot: the dashed edge reads "place content here"
+            // instead of a dead row, and the fill sits below every lane tint.
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(EditorTheme.chrome(0.030))
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(
+                    EditorTheme.chrome(0.14),
+                    style: StrokeStyle(lineWidth: 1, dash: [5, 4])
+                )
+        }
+        .padding(.leading, layout.value(regular: 26, compact: 22))
         .frame(width: visibleWidth, alignment: .leading)
         .offset(x: visibleRange.lowerBound)
         .allowsHitTesting(false)
@@ -124,7 +140,8 @@ extension EditorTimelineView {
         } label: {
             TimelineTrackManagerLabel(
                 isPresented: isTimelineTrackManagerPresented,
-                horizontalInset: layout.value(regular: 16, compact: 6)
+                horizontalInset: timelineLabelsCollapsed ? 0 : layout.value(regular: 12, compact: 6),
+                collapsed: timelineLabelsCollapsed
             )
         }
         .buttonStyle(.plain)
@@ -154,77 +171,60 @@ extension EditorTimelineView {
         return count
     }
 
+    /// The track panel in the editor's own grammar: a title, then one tile
+    /// of rows, each with its lane colour, a count and a real switch. Space
+    /// separates the parts; there are no rules.
     private var timelineTrackVisibilityPanel: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .center, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text("轨道显示")
-                        .font(.appUI(size: 13, weight: .semibold))
-                        .foregroundStyle(EditorTheme.chrome(0.94))
+                        .font(.appUI(size: 14, weight: .semibold))
+                        .foregroundStyle(EditorTheme.primaryText)
                     Text("隐藏只收起编辑区，不会停用效果")
-                        .font(.appUI(size: 10, weight: .medium))
-                        .foregroundStyle(EditorTheme.popoverSecondaryText)
+                        .font(.appUI(size: 11))
+                        .foregroundStyle(EditorTheme.secondaryText)
                 }
-
                 Spacer(minLength: 8)
-
                 Text("\(visibleOptionalTrackCount) / 4")
-                    .font(.appUI(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(EditorTheme.chrome(0.66))
-                    .padding(.horizontal, 8)
-                    .frame(height: 22)
-                    .background(
-                        EditorTheme.chrome(0.065),
-                        in: Capsule(style: .continuous)
-                    )
+                    .font(.appUI(size: 11, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(EditorTheme.secondaryText)
+                    .contentTransition(.numericText())
+                    .padding(.horizontal, 9)
+                    .frame(height: 24)
+                    .background(EditorTheme.chrome(0.06), in: Capsule(style: .continuous))
+                    .animation(SpringMotion.snappy, value: visibleOptionalTrackCount)
                     .accessibilityHidden(true)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 11)
+            .padding(.horizontal, 4)
 
-            Divider().overlay(dividerColor)
-
-            VStack(spacing: 3) {
+            VStack(spacing: 2) {
                 timelineTrackVisibilityRow(
-                    "缩放",
-                    symbol: "magnifyingglass",
-                    tint: editorZoomClip,
-                    track: .zoom,
+                    "缩放", symbol: "magnifyingglass", palette: EditorConsole.Track.zoom, track: .zoom,
                     clipCount: editorStore.previewProject.zoomAnimations.count
                 )
                 timelineTrackVisibilityRow(
-                    "屏幕 3D",
-                    symbol: "cube.transparent",
-                    tint: motionTrackColor(.screen),
-                    track: .screenMotion,
+                    "屏幕 3D", symbol: "cube.transparent", palette: EditorConsole.Track.screenMotion, track: .screenMotion,
                     clipCount: editorStore.previewProject.timeline.screenMotionClips.count
                 )
                 timelineTrackVisibilityRow(
-                    "摄像运动",
-                    symbol: "video",
-                    tint: motionTrackColor(.camera),
-                    track: .cameraMotion,
+                    "摄像运动", symbol: "video", palette: EditorConsole.Track.cameraMotion, track: .cameraMotion,
                     clipCount: editorStore.previewProject.timeline.cameraMotionClips.count,
                     isEnabled: mediaSession.inventories.camera.hasVideo,
                     disabledDetail: "无摄像头素材"
                 )
-
-                Divider()
-                    .overlay(dividerColor)
-                    .padding(.vertical, 3)
-
                 timelineTrackVisibilityRow(
-                    "叠加",
-                    symbol: "square.on.square",
-                    tint: editorOverlayClip,
-                    track: .overlays,
+                    "叠加", symbol: "square.on.square", palette: EditorConsole.Track.overlay, track: .overlays,
                     clipCount: editorStore.previewProject.timeline.mosaicClips.count
                         + editorStore.previewProject.timeline.stickerClips.count
                 )
             }
-            .padding(8)
+            .padding(6)
+            .background(EditorTheme.cardFill, in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.tile, style: .continuous))
+            .environment(\.editorInsideTile, true)
         }
-        .frame(width: 286)
+        .padding(12)
+        .frame(width: 300)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("轨道显示设置")
     }
@@ -232,7 +232,7 @@ extension EditorTimelineView {
     func timelineTrackVisibilityRow(
         _ title: String,
         symbol: String,
-        tint: Color,
+        palette: EditorConsolePalette,
         track: EditorTimelineTrackVisibility,
         clipCount: Int,
         isEnabled: Bool = true,
@@ -242,100 +242,46 @@ extension EditorTimelineView {
             ? !visibleTracks.intersection(.overlays).isEmpty
             : visibleTracks.contains(track)
         let localizedTitle = appLocalized(title)
-        let actionTitle = String(
-            format: appLocalized(isVisible ? "隐藏“%@”轨道" : "显示“%@”轨道"),
-            localizedTitle
-        )
         let contentCount = String(format: appLocalized("%d 个内容"), clipCount)
-        let visibilityTitle = appLocalized(isVisible ? "轨道状态 · 显示" : "轨道状态 · 隐藏")
-        let toggleVisibility = {
-            setTimelineTrack(track, visible: !isVisible)
-        }
-        return Button(action: toggleVisibility) {
-            HStack(spacing: 10) {
-                Image(systemName: symbol)
-                    .font(.appUI(size: 11, weight: .semibold))
-                    .foregroundStyle(tint.opacity(isVisible ? 1 : 0.62))
-                    .frame(width: 25, height: 25)
-                    .background(
-                        tint.opacity(isVisible ? 0.20 : 0.09),
-                        in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous)
-                    )
-                    .accessibilityHidden(true)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(localizedTitle)
-                        .font(.appUI(size: 11.5, weight: .semibold))
-                        .foregroundStyle(EditorTheme.primaryText)
-
-                    Text(isEnabled ? contentCount : appLocalized(disabledDetail ?? "当前不可用"))
-                        .font(.appUI(size: 9.5, weight: .medium))
-                        .foregroundStyle(EditorTheme.secondaryText)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 6)
-
-                HStack(spacing: 5) {
-                    Image(systemName: isVisible ? "eye.fill" : "eye.slash")
-                        .font(.appUI(size: 9.5, weight: .semibold))
-                    Text(visibilityTitle)
-                        .font(.appUI(size: 10, weight: .medium))
-                }
-                .foregroundStyle(
-                    isVisible
-                        ? EditorTheme.primaryText
-                        : EditorTheme.popoverSecondaryText
-                )
-                .padding(.horizontal, 8)
-                .frame(height: 24)
-                .background(
-                    isVisible
-                        ? EditorTheme.chrome(0.075)
-                        : EditorTheme.chrome(0.055),
-                    in: Capsule(style: .continuous)
-                )
-                .overlay {
-                    if !isVisible {
-                        Capsule(style: .continuous)
-                            .stroke(EditorTheme.chrome(0.085), lineWidth: 0.75)
-                    }
-                }
+        return HStack(spacing: 11) {
+            EditorSymbol(symbol, size: 15)
+                .foregroundStyle(palette.stroke)
+                .frame(width: 30, height: 30)
+                .background(palette.soft, in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous))
+                .saturation(isVisible ? 1 : 0.2)
+                .opacity(isVisible ? 1 : 0.7)
                 .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(localizedTitle)
+                    .font(.appUI(size: 13, weight: .medium))
+                    .foregroundStyle(EditorTheme.primaryText)
+                Text(isEnabled ? contentCount : appLocalized(disabledDetail ?? "当前不可用"))
+                    .font(.appUI(size: 11))
+                    .foregroundStyle(EditorTheme.secondaryText)
+                    .lineLimit(1)
             }
-            .padding(.horizontal, 7)
-            .frame(height: 45)
-            .background(
-                isVisible ? EditorTheme.popoverSelectionSurface : Color.clear,
-                in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.control, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: EditorInterfaceRadius.control, style: .continuous)
-                    .stroke(
-                        isVisible ? EditorTheme.chrome(0.14) : Color.clear,
-                        lineWidth: 0.75
+            .accessibilityHidden(true)
+            Spacer(minLength: 6)
+            EditorToggle(isOn: Binding(
+                get: { isVisible },
+                set: { setTimelineTrack(track, visible: $0) }
+            ))
+            .accessibilityLabel(String(format: appLocalized("%@轨道"), localizedTitle))
+            .accessibilityValue(appLocalized(isVisible ? "轨道状态 · 显示" : "轨道状态 · 隐藏"))
+            .help(
+                isEnabled
+                    ? String(
+                        format: appLocalized("%@；隐藏不会停用效果"),
+                        String(format: appLocalized(isVisible ? "隐藏“%@”轨道" : "显示“%@”轨道"), localizedTitle)
                     )
-            }
+                    : appLocalized(disabledDetail ?? "当前不可用")
+            )
         }
-        .buttonStyle(TimelineTrackVisibilityRowButtonStyle())
-        .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.control, style: .continuous))
+        .padding(.horizontal, 8)
+        .frame(height: 48)
+        .opacity(isEnabled ? 1 : 0.45)
         .disabled(!isEnabled)
-        .help(
-            isEnabled
-                ? String(format: appLocalized("%@；隐藏不会停用效果"), actionTitle)
-                : appLocalized(disabledDetail ?? "当前不可用")
-        )
-        .accessibilityLabel(actionTitle)
-        .accessibilityValue(String(format: appLocalized("目前%@，%@"), visibilityTitle, contentCount))
-        .accessibilityHint("隐藏轨道不会停用其中效果")
-        .onKeyPress(keys: [.return], phases: .down) { press in
-            guard isEnabled,
-                  press.modifiers.intersection([.command, .control, .option, .shift]).isEmpty else {
-                return .ignored
-            }
-            toggleVisibility()
-            return .handled
-        }
+        .animation(SpringMotion.settle, value: isVisible)
     }
 
     func optionalTimelineLabel(
@@ -351,11 +297,12 @@ extension EditorTimelineView {
         case .overlays: "square.3.layers.3d"
         default: "square.stack"
         }
-        return EditorTimelineLaneLabel(title: title, symbol: symbol, onHide: {
+        return EditorTimelineLaneLabel(title: title, symbol: symbol, tint: tint, onHide: {
             setTimelineTrack(track, visible: false)
-        }, horizontalInset: layout.value(regular: 16, compact: 6))
+        }, horizontalInset: layout.value(regular: 12, compact: 6), collapsed: timelineLabelsCollapsed)
         .frame(height: height)
-        .transition(.opacity.combined(with: .offset(y: 8)))
+        .timelineRowDivider()
+        .transition(.timelineLane)
         .accessibilityElement(children: .contain)
     }
 
@@ -364,10 +311,13 @@ extension EditorTimelineView {
         visible: Bool
     ) {
         cancelActiveTimelineGesture()
-        if visible {
-            visibleTracks.insert(track)
-        } else {
-            visibleTracks.remove(track)
+        // Labels and lanes open and close together on one spring.
+        withAnimation(SpringMotion.settle) {
+            if visible {
+                visibleTracks.insert(track)
+            } else {
+                visibleTracks.remove(track)
+            }
         }
     }
 }

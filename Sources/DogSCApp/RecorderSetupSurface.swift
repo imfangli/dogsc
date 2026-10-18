@@ -41,6 +41,7 @@ struct RecorderSetupSurface: View {
             .firstUseTourTarget("recorder.save", in: .recorder, highlight: .rounded(22))
 
             recordButton.padding(.leading, 4)
+            RecorderDragGrip()
         }
         .padding(.horizontal, 8)
         .frame(height: 56)
@@ -151,11 +152,13 @@ private struct RecorderModeShape: Shape {
 /// arrow keys to step. One AppKit view so the first click lands even while
 /// another app is frontmost.
 private struct RecorderModeWheelInput: NSViewRepresentable {
+    @Environment(\.locale) private var locale
     let label: String
     let onStep: (Int) -> Void
 
     func makeNSView(context: Context) -> WheelView { WheelView() }
     func updateNSView(_ view: WheelView, context: Context) {
+        _ = locale
         view.onStep = onStep
         view.setAccessibilityLabel(appLocalized("开始录制"))
         view.setAccessibilityValue(label)

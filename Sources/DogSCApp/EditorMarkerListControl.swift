@@ -12,7 +12,7 @@ struct EditorMarkerListControl: View {
     var body: some View {
         Button { presenter.toggle() } label: {
             HStack(spacing: 6) {
-                Image(systemName: "bookmark").font(.appUI(size: 12, weight: .medium))
+                EditorSymbol("bookmark", size: 15.5).font(.appUI(size: 12, weight: .medium))
                 Text("标记").font(.appUI(size: 11, weight: .medium))
             }
             .foregroundStyle(EditorTheme.chrome(0.68))
@@ -39,7 +39,7 @@ struct EditorMarkerListControl: View {
                     .foregroundStyle(EditorTheme.chrome(0.42))
                 Spacer(minLength: 4)
                 Button { presenter.dismiss(restoreFocus: true) } label: {
-                    Image(systemName: "xmark").font(.appUI(size: 10, weight: .medium))
+                    EditorSymbol("xmark", size: 13).font(.appUI(size: 10, weight: .medium))
                         .frame(width: 22, height: 24).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -93,7 +93,7 @@ private struct EditorMarkerListRow: View {
         HStack(spacing: 0) {
             Button(action: select) {
                 HStack(spacing: 9) {
-                    Image(systemName: "bookmark").font(.appUI(size: 12, weight: .medium))
+                    EditorSymbol("bookmark", size: 15.5).font(.appUI(size: 12, weight: .medium))
                         .foregroundStyle(Color(red: 0.65, green: 0.47, blue: 0.22))
                     Text(item.label).font(.appUI(size: 12, weight: .medium))
                     Spacer(minLength: 6)
@@ -101,7 +101,7 @@ private struct EditorMarkerListRow: View {
                         .font(.appUI(size: 11, weight: .medium, design: .monospaced))
                         .padding(.horizontal, 7).padding(.vertical, 4)
                         .background(EditorTheme.chrome(0.035), in: RoundedRectangle(cornerRadius: 5))
-                    Image(systemName: "chevron.right").font(.appUI(size: 9, weight: .medium))
+                    EditorSymbol("chevron.right", size: 11.5).font(.appUI(size: 10, weight: .medium))
                         .foregroundStyle(EditorTheme.chrome(0.38))
                 }
                 .padding(.leading, 12).padding(.trailing, 8).frame(height: 41)
@@ -111,7 +111,7 @@ private struct EditorMarkerListRow: View {
             .appKeyboardFocus(in: RoundedRectangle(cornerRadius: 8))
             .accessibilityLabel(item.label + " · " + item.timestamp)
             Button(action: remove) {
-                Image(systemName: "trash").font(.appUI(size: 10))
+                EditorSymbol("trash", size: 13).font(.appUI(size: 10))
                     .foregroundStyle(EditorTheme.chrome(hovered ? 0.55 : 0.28))
                     .frame(width: 24, height: 30).contentShape(Rectangle())
             }
@@ -121,7 +121,7 @@ private struct EditorMarkerListRow: View {
             .accessibilityLabel(appLocalized("删除录制标记") + " · " + item.label)
             .padding(.trailing, 5)
         }
-        .background(EditorTheme.chrome(hovered ? 0.035 : 0), in: RoundedRectangle(cornerRadius: 8))
+        .background(EditorTheme.chrome(hovered ? EditorStateWash.hover : 0), in: RoundedRectangle(cornerRadius: 8))
         .onHover { hovered = $0 }
     }
 }

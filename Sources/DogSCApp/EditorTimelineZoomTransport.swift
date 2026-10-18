@@ -45,7 +45,7 @@ func zoomTimeline(width: CGFloat, duration: TimeInterval) -> some View {
                 let accessibilityValue = String(
                     format: appLocalized("%@ 至 %@，%@ 倍，%@"),
                     timelineTimestamp(segment.startTime), timelineTimestamp(segment.endTime),
-                    String(format: "%.1f", segment.scale), originTitle
+                    EditorSliderValueFormat.compact(segment.scale, digits: 1), originTitle
                 )
                 let accessibilityTraits: AccessibilityTraits = selectedZoomID == segment.id
                     ? [.isButton, .isSelected] : .isButton
@@ -56,29 +56,29 @@ func zoomTimeline(width: CGFloat, duration: TimeInterval) -> some View {
                     isSelected: isSelected,
                     isHovered: isHovered
                 )
-                let label = "\(appLocalized("缩放")) \(String(format: "%.1f", segment.scale))× · "
+                let label = "\(appLocalized("缩放")) \(EditorSliderValueFormat.compact(segment.scale, unit: "×", digits: 1)) · "
                     + originTitle
                 ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    EditorTheme.timelineZoomSurface,
-                                    EditorTheme.timelineZoomSurface.opacity(0.86),
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(EditorConsole.Track.zoom.timelineSurface(emphasis))
                         .overlay {
                             if segmentWidth > 86 {
                                 Text(label)
-                                .font(.appUI(size: 12, weight: .medium))
-                                .foregroundStyle(EditorTheme.chrome(0.74))
-                                .lineLimit(1)
+                                    .font(.appUI(size: 11, weight: .medium))
+                                    .foregroundStyle(EditorConsole.Track.zoom.softInk)
+                                    .lineLimit(1)
+                            } else if segmentWidth > 44 {
+                                Text(EditorSliderValueFormat.compact(segment.scale, unit: "×", digits: 1))
+                                    .font(.appUI(size: 11, weight: .semibold))
+                                    .foregroundStyle(EditorConsole.Track.zoom.softInk)
+                                    .lineLimit(1)
+                            } else {
+                                EditorSymbol("magnifyingglass", size: 10.5)
+                                    .font(.system(size: 8, weight: .semibold))
+                                    .foregroundStyle(EditorConsole.Track.zoom.softInk)
                             }
                         }
-                        .editorTimelineClipChrome(cornerRadius: 10, emphasis: emphasis)
+                        .editorTimelineClipChrome(cornerRadius: 8, emphasis: emphasis, tint: EditorConsole.Track.zoom.stroke)
 
                     if emphasis.showsHandles {
                         HStack(spacing: 0) {
@@ -92,7 +92,9 @@ func zoomTimeline(width: CGFloat, duration: TimeInterval) -> some View {
                     }
                 }
                 .frame(width: segmentWidth, height: zoomBarHeight)
+                .editorClipDragFeedback(zoomTrackDrag == .move(segment.id))
                 .offset(x: startX)
+                .transition(.identity)
                 .zIndex(emphasis == .editing ? 4 : isSelected ? 3 : isHovered ? 1 : 0)
                 .contentShape(Rectangle())
                 .contextMenu {
@@ -101,7 +103,7 @@ func zoomTimeline(width: CGFloat, duration: TimeInterval) -> some View {
                     Button(role: .destructive) {
                         removeZoomAnimation(id: segment.id)
                     } label: {
-                        Label("删除缩放动画", systemImage: "trash")
+                        EditorSymbolLabel("删除缩放动画", systemImage: "trash")
                     }
                 }
                 .onHover { hovering in
@@ -123,11 +125,11 @@ func zoomTimeline(width: CGFloat, duration: TimeInterval) -> some View {
             // 悬浮空白处显示创建起点；需要水平拖动形成区间，单击只定位，
             // 不会意外写入一个默认片段。
             if let indicatorX = zoomCreateIndicatorX(width: width, duration: duration) {
-                Image(systemName: "plus")
-                    .font(.appUI(size: 9, weight: .bold))
-                    .foregroundStyle(EditorTheme.onAccent)
+                EditorSymbol("plus", size: 11.5)
+                    .font(.appUI(size: 10, weight: .bold))
+                    .foregroundStyle(EditorConsole.Track.zoom.ink)
                     .frame(width: 18, height: 18)
-                    .background(Circle().fill(editorAccent))
+                    .background(Circle().fill(EditorConsole.Track.zoom.fill))
                     .offset(x: indicatorX - 9)
                     .allowsHitTesting(false)
             }
@@ -139,10 +141,10 @@ func zoomTimeline(width: CGFloat, duration: TimeInterval) -> some View {
                 let startX = CGFloat(start / max(duration, 0.001)) * width
                 let rangeWidth = max(CGFloat((end - start) / max(duration, 0.001)) * width, 4)
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(editorAccent.opacity(0.42))
+                    .fill(EditorConsole.Track.zoom.timelineSurface(.hovered))
                     .overlay(
                         RoundedRectangle(cornerRadius: 7)
-                            .stroke(EditorTheme.chrome(0.8), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            .stroke(EditorConsole.Track.zoom.stroke, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                     )
                     .frame(width: rangeWidth, height: zoomBarHeight)
                     .offset(x: startX)
@@ -215,14 +217,15 @@ func zoomTimeline(width: CGFloat, duration: TimeInterval) -> some View {
 
     func zoomResizeHandle(edge: ZoomResizeEdge) -> some View {
         Capsule()
-            .fill(EditorTheme.chrome(0.92))
-            .frame(width: 4, height: 30)
+            .fill(EditorConsole.Track.zoom.stroke)
+            .frame(width: 3, height: 14)
             .accessibilityLabel(appLocalized(edge == .leading ? "调整动画开始" : "调整动画结束"))
     }
 
     func zoomTrackGesture(width: CGFloat, duration: TimeInterval) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                EditorDragFrameCoalescer.shared.submit {
                 if zoomTrackDrag == nil {
                     beginZoomTrackDrag(at: value.startLocation, width: width, duration: duration)
                 }
@@ -282,7 +285,9 @@ func zoomTimeline(width: CGFloat, duration: TimeInterval) -> some View {
                     break
                 }
             }
+}
             .onEnded { value in
+                EditorDragFrameCoalescer.shared.flush()
                 let drag = zoomTrackDrag
                 let origin = zoomGestureOrigin
                 let createStart = manualZoomDragStart
@@ -306,11 +311,9 @@ func zoomTimeline(width: CGFloat, duration: TimeInterval) -> some View {
                         duration: duration
                     )
                     playbackController.pause()
-                    withAnimation(SpringMotion.fluid) {
-                        createZoomRange(start: start,
-                            end: isDrawnRange ? (createEnd ?? start) : start + 3,
-                            duration: duration)
-                    }
+                    createZoomRange(start: start,
+                        end: isDrawnRange ? (createEnd ?? start) : start + 3,
+                        duration: duration)
                     endTimelineGesture(.zoomCreate)
                 case let .move(id):
                     let intent = EditorTimelineGestureIntent.zoomMove(id)
@@ -565,6 +568,11 @@ func zoomTimeline(width: CGFloat, duration: TimeInterval) -> some View {
         String(format: appLocalized("%@（D 或 Delete）"), appLocalized(currentTimelineDeleteAccessibilityLabel))
     }
 
+    private var selectedRegionIsSpotlight: Bool {
+        guard case let .mosaic(id) = editorStore.selection else { return false }
+        return editorStore.previewProject.timeline.mosaicClips.first(where: { $0.id == id })?.style == .spotlight
+    }
+
     var currentTimelineDeleteAccessibilityLabel: String {
         if selectedCameraSyncAnchorID != nil { return "删除选中的摄像头同步点" }
         switch EditorTimelineDeleteTarget(selection: editorStore.selection) {
@@ -572,7 +580,7 @@ func zoomTimeline(width: CGFloat, duration: TimeInterval) -> some View {
         case .zoom: return "删除选中的缩放动画"
         case .screenMotion: return "删除选中的屏幕 3D"
         case .cameraMotion: return "删除选中的摄像运动"
-        case .mosaic: return "删除选中的打码"
+        case .mosaic: return selectedRegionIsSpotlight ? "删除选中的突出" : "删除选中的柔化"
         case .sticker: return "删除选中的贴图"
         case nil: return "删除当前时间线选中项"
         }
@@ -644,7 +652,7 @@ func zoomTimeline(width: CGFloat, duration: TimeInterval) -> some View {
         case .cameraMotion:
             return "在播放头处分割选中的摄像运动（S）"
         case .mosaic:
-            return "在播放头处分割选中的打码（S）"
+            return selectedRegionIsSpotlight ? "在播放头处分割选中的突出（S）" : "在播放头处分割选中的柔化（S）"
         case .sticker:
             return "在播放头处分割选中的贴图（S）"
         case nil:
@@ -657,7 +665,7 @@ func zoomTimeline(width: CGFloat, duration: TimeInterval) -> some View {
         case .zoom: return "分割选中的缩放动画"
         case .screenMotion: return "分割选中的屏幕 3D"
         case .cameraMotion: return "分割选中的摄像运动"
-        case .mosaic: return "分割选中的打码"
+        case .mosaic: return selectedRegionIsSpotlight ? "分割选中的突出" : "分割选中的柔化"
         case .sticker: return "分割选中的贴图"
         case nil: return "在播放头处分割主片段"
         }
@@ -1252,6 +1260,25 @@ func zoomTimeline(width: CGFloat, duration: TimeInterval) -> some View {
     func transportTimestamp(_ time: TimeInterval) -> String {
         let value = max(Int((time * 100).rounded(.down)), 0)
         return String(format: "%02d:%02d.%02d", value / 6000, (value / 100) % 60, value % 100)
+    }
+
+    /// Ruler marks drop zero hundredths: "0:18", but "0:18.50".
+    func timelineRulerLabel(_ time: TimeInterval) -> String {
+        let centiseconds = max(Int((time * 100).rounded()), 0)
+        let minutes = centiseconds / 6_000
+        let seconds = (centiseconds / 100) % 60
+        let fraction = centiseconds % 100
+        return fraction == 0
+            ? String(format: "%d:%02d", minutes, seconds)
+            : String(format: "%d:%02d.%02d", minutes, seconds, fraction)
+    }
+
+    /// A clip's length as people say it: "4.7s", "12s", "1:05".
+    func timelineClipLength(_ duration: TimeInterval) -> String {
+        if duration < 10 { return String(format: "%.1fs", duration) }
+        if duration < 60 { return String(format: "%.0fs", duration.rounded()) }
+        let total = Int(duration.rounded())
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 
     func timelineTimestamp(_ time: TimeInterval) -> String {

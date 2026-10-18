@@ -67,7 +67,7 @@ extension CanvasPreview {
 
             if let readout = canvasManipulationReadout() {
                 HStack(spacing: 7) {
-                    Label(readout.title, systemImage: readout.systemImage)
+                    EditorSymbolLabel(readout.title, systemImage: readout.systemImage)
                         .foregroundStyle(Color.white.opacity(0.82))
                     Rectangle()
                         .fill(Color.white.opacity(0.25))
@@ -76,7 +76,7 @@ extension CanvasPreview {
                         .monospacedDigit()
                         .foregroundStyle(Color.white)
                 }
-                .font(.appUI(size: 11.5, weight: .semibold))
+                .font(.appUI(size: 12, weight: .semibold))
                 .padding(.horizontal, 12)
                 .frame(height: 32)
                 .background(
@@ -114,7 +114,7 @@ extension CanvasPreview {
                 return CanvasManipulationReadout(
                     systemImage: "arrow.up.left.and.arrow.down.right",
                     title: "屏幕大小",
-                    value: String(format: "%.2f×", scale),
+                    value: EditorSliderValueFormat.compact(scale, unit: "×"),
                     objectY: position.y
                 )
             }

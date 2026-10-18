@@ -164,7 +164,7 @@ struct EditorLinearFocusCanvasOverlay: View {
                 EditorLinearFocusRotationHandle(rotation: rotation,
                     isActive: hoveredHandle == role || origin != nil)
             } else {
-                Image(systemName: symbol).font(.system(size: 12, weight: .medium))
+                EditorSymbol(symbol, size: 15.5).font(.system(size: 12, weight: .medium))
                     .rotationEffect(.degrees(rotation))
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.8), radius: 1)

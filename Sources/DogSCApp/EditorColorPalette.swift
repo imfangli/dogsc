@@ -33,11 +33,11 @@ struct EditorColorPalette: View {
                 Text(appLocalized(title)).font(.appUI(size: 13, weight: .semibold))
                 Spacer()
                 Button { dismiss() } label: {
-                    Image(systemName: "xmark").font(.appUI(size: 10, weight: .medium))
+                    EditorSymbol("xmark", size: 13).font(.appUI(size: 10, weight: .medium))
                         .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.editorToolbarPress)
-                .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous))
                 .accessibilityLabel("关闭调色面板")
             }
 
@@ -45,9 +45,9 @@ struct EditorColorPalette: View {
             hueStrip
 
             HStack(spacing: 10) {
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous)
                     .fill(Color(hex: lastPreview))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(EditorTheme.hairline))
+                    .overlay(RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous).strokeBorder(EditorTheme.hairline))
                     .frame(width: 32, height: 32)
                     .accessibilityHidden(true)
                 Text("HEX").font(.appUI(size: 10, weight: .medium))
@@ -59,7 +59,7 @@ struct EditorColorPalette: View {
                     .tint(nil)
                     .font(.appUI(size: 12, weight: .medium, design: .monospaced))
                     .padding(.horizontal, 10).frame(height: 32)
-                    .background(EditorTheme.chrome(0.045), in: RoundedRectangle(cornerRadius: 8))
+                    .background(EditorChoiceStyle.track, in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous))
                     .accessibilityLabel(String(format: appLocalized("%@十六进制值"), appLocalized(title)))
                     .onChange(of: hexText) { _, text in
                         guard let color = HexColor(text), color != lastPreview else { return }
@@ -97,7 +97,7 @@ struct EditorColorPalette: View {
                         y: min(max(geometry.size.height * (1 - brightness), 8), geometry.size.height - 8)
                     )
             }
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .clipShape(RoundedRectangle(cornerRadius: EditorInterfaceRadius.control, style: .continuous))
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0).onChanged { gesture in
                 saturation = clamp(gesture.location.x / max(geometry.size.width, 1))

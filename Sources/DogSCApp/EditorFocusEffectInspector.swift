@@ -28,21 +28,18 @@ struct EditorFocusEffectInspector: View {
     var body: some View {
         EditorInspectorSection(isLinear ? "线性虚化" : "聚焦") {
             HStack {
-                Text(appLocalized(isLinear ? "清晰带 · 两侧渐变虚化" : "清晰焦点 · 柔化外围"))
-                    .font(.appUI(.caption))
+                Text("启用")
+                    .font(.appUI(size: 11))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 8)
                 EditorToggle(isOn: Binding(get: { effect != nil }, set: {
                     update($0 ? FocusEffect(linear: isLinear) : nil)
                     commit()
                 }))
-                .accessibilityLabel("启用聚焦")
+                .accessibilityLabel(appLocalized(isLinear ? "启用线性虚化" : "启用聚焦"))
             }
             if let effect {
                 if isLinear {
-                    Label("实线调整区域，虚线调整羽化；拖动圆柄旋转", systemImage: "hand.draw")
-                        .font(.appUI(size: 11)).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                     MotionValueSlider(title: "方向", value: effect.angleDegrees ?? 0, range: 0...360,
                         valueText: EditorSliderValueFormat.degrees.text(for: effect.angleDegrees ?? 0),
                         formatValue: { EditorSliderValueFormat.degrees.text(for: $0) }, inputFormat: .degrees,
@@ -83,10 +80,6 @@ struct EditorFocusEffectInspector: View {
                 parameter("模糊程度", keyPath: \.blur, range: 0...1, effect: effect)
                 parameter("羽化范围", keyPath: \.softness, range: 0...1, effect: effect)
                 if !isLinear { parameter("暗角", keyPath: \.dimming, range: 0...1, effect: effect) }
-                Text("随动画进入和退出，摄像头与贴图保持清晰。")
-                    .font(.appUI(.caption2))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

@@ -50,7 +50,7 @@ struct EditorCanvasRatioSelector: View {
         Button(action: presentPanel) {
             EditorToolbarControlSurface(accessibilityTitle: "画布比例") { entryLabel }
         }
-        .buttonStyle(EditorToolbarPressButtonStyle(cornerRadius: 9, cornerStyle: .continuous))
+        .buttonStyle(EditorToolbarPressButtonStyle())
         .accessibilityLabel("画布比例")
         .accessibilityValue(valueLabel)
         .editorPopoverKeyboardEntry(action: presentPanel)
@@ -64,9 +64,9 @@ struct EditorCanvasRatioSelector: View {
 
     private var entryLabel: some View {
         HStack(spacing: 8) {
-            Image(systemName: "aspectratio")
+            EditorSymbol("aspectratio", size: 11.5)
             Text(valueLabel).lineLimit(1).fixedSize()
-            Image(systemName: "chevron.down").font(.appUI(size: 9, weight: .medium))
+            EditorSymbol("chevron.down", size: 11.5).font(.appUI(size: 10, weight: .medium))
                 .foregroundStyle(.secondary)
         }
     }
@@ -76,14 +76,14 @@ struct EditorCanvasRatioSelector: View {
             HStack {
                 Text("画布比例").font(.appUI(size: 14, weight: .semibold))
                 Spacer()
-                Button { isPresented = false } label: { Image(systemName: "xmark") }
+                Button { isPresented = false } label: { EditorSymbol("xmark", size: 14) }
                     .buttonStyle(.editorGhost)
                     .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous))
                     .accessibilityLabel("关闭")
             }
             controls
         }
-        .padding(18).frame(width: 320)
+        .padding(16).frame(width: 320)
         .animation(SpringMotion.fluid, value: editingCustom)
     }
 
@@ -100,13 +100,8 @@ struct EditorCanvasRatioSelector: View {
                         customRatioField("高", text: $heightText, field: .height)
                     }
                     .padding(.horizontal, 6)
-                    .background(EditorTheme.groupSurface,
+                    .background(EditorChoiceStyle.track,
                                 in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous)
-                            .strokeBorder(EditorTheme.controlBorder, lineWidth: 0.75)
-                            .allowsHitTesting(false)
-                    }
                     Button("应用") {
                         guard let value = customValue else { return }
                         var updated = canvas
@@ -122,9 +117,9 @@ struct EditorCanvasRatioSelector: View {
                     orientationButton("横向", symbol: "rectangle", isPortrait: false)
                     orientationButton("竖向", symbol: "rectangle.portrait", isPortrait: true)
                 }
-                .padding(4)
-                .background(EditorTheme.groupSurface,
-                            in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.group, style: .continuous))
+                .padding(2)
+                .background(EditorChoiceStyle.track,
+                            in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.control, style: .continuous))
             }
         }
     }
@@ -163,7 +158,7 @@ struct EditorCanvasRatioSelector: View {
         } label: {
             VStack(spacing: 7) {
                 if ratio == .custom || ratio == .adaptive {
-                    Image(systemName: ratio == .custom ? "slider.horizontal.3" : "arrow.up.left.and.arrow.down.right")
+                    EditorSymbol(ratio == .custom ? "slider.horizontal.3" : "arrow.up.left.and.arrow.down.right", size: 14)
                         .frame(height: 24)
                 } else {
                     RoundedRectangle(cornerRadius: 3).strokeBorder(lineWidth: 1.3)
@@ -172,21 +167,20 @@ struct EditorCanvasRatioSelector: View {
                 Text(appLocalized(ratio == .cinema ? "电影" : ratio.rawValue))
                     .font(.appUI(size: 12, weight: selected ? .medium : .regular)).lineLimit(1)
             }
-            .foregroundStyle(selected ? EditorTheme.selectionTint : EditorTheme.primaryText)
+            .foregroundStyle(EditorTheme.primaryText)
             .frame(maxWidth: .infinity).frame(height: 68)
             .background {
+                RoundedRectangle(cornerRadius: EditorInterfaceRadius.control, style: .continuous)
+                    .fill(EditorTheme.cardFill)
                 if selected {
                     RoundedRectangle(cornerRadius: EditorInterfaceRadius.control, style: .continuous)
-                        .fill(EditorTheme.popoverSelectionSurface)
+                        .fill(EditorTheme.selectionWash)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: EditorInterfaceRadius.control, style: .continuous)
+                                .strokeBorder(EditorTheme.platinumAccent, lineWidth: 1.5)
+                        }
                         .matchedGeometryEffect(id: "ratio", in: highlight)
-                } else {
-                    RoundedRectangle(cornerRadius: EditorInterfaceRadius.control, style: .continuous)
-                        .fill(EditorTheme.groupSurface)
                 }
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: EditorInterfaceRadius.control, style: .continuous)
-                    .strokeBorder(EditorTheme.chrome(selected ? 0.14 : 0.055), lineWidth: 0.75)
             }
             .contentShape(RoundedRectangle(cornerRadius: EditorInterfaceRadius.control, style: .continuous))
         }.buttonStyle(EditorToolbarPressButtonStyle(cornerRadius: EditorInterfaceRadius.control))
@@ -201,14 +195,14 @@ struct EditorCanvasRatioSelector: View {
             updated.aspectRatio = oriented(selectedPreset, portrait: isPortrait)
             withAnimation(SpringMotion.fluid) { canvas = updated }
         } label: {
-            Label(appLocalized(title), systemImage: symbol)
+            EditorSymbolLabel(appLocalized(title), systemImage: symbol)
                 .font(.appUI(size: 12, weight: .medium))
+                .foregroundStyle(portrait == isPortrait ? EditorTheme.primaryText : EditorTheme.secondaryText)
                 .frame(maxWidth: .infinity).frame(height: EditorInterfaceHeight.selection)
-                .background(portrait == isPortrait ? EditorTheme.popoverSelectionSurface : .clear,
-                    in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous)
-                        .strokeBorder(EditorTheme.chrome(portrait == isPortrait ? 0.09 : 0), lineWidth: 0.75)
+                .background {
+                    if portrait == isPortrait {
+                        EditorRaisedThumb(shape: RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous), usesAccent: false)
+                    }
                 }
         }.buttonStyle(EditorToolbarPressButtonStyle(cornerRadius: EditorInterfaceRadius.compact))
         .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous))

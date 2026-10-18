@@ -1,6 +1,40 @@
 import AppKit
 import SwiftUI
 
+/// Native buttons own nearly all of the compact bar. Reserve an explicit
+/// SwiftUI target for the root's WindowDragGesture instead of requiring the
+/// user to find a few pixels between buttons. The shadow remains click-through.
+struct RecorderDragGrip: View {
+    var body: some View {
+        HStack(spacing: 3) {
+            dots
+            dots
+        }
+        .foregroundStyle(RecorderStyle.faint)
+        .frame(width: 22, height: 40)
+        .contentShape(Rectangle())
+        .help(appLocalized("拖动录制条"))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(appLocalized("拖动录制条"))
+        .accessibilityIdentifier("recorder.window-drag-grip")
+    }
+
+    private var dots: some View {
+        VStack(spacing: 3) {
+            ForEach(0..<3, id: \.self) { _ in
+                Circle().frame(width: 2, height: 2)
+            }
+        }
+    }
+}
+
+/// Background SwiftUI regions must accept the first press just like the
+/// recorder's native buttons. Otherwise an inactive panel consumes that press
+/// to focus and its WindowDragGesture cannot start until the next attempt.
+final class RecorderHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 /// The window includes shadow drawing room, but only the visible island may
 /// receive pointer input. NSView.hitTest alone cannot pass a click to another
 /// process; change the window's acceptance before the next mouse-down instead.

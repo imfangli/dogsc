@@ -834,6 +834,8 @@ struct EditorTimelineView: View {
     @State var timelineVisibleDocumentRange: ClosedRange<CGFloat> = 0...1
     @State var timelineBoundsObservation: NSObjectProtocol?
     @State var isTimelineTrackManagerPresented = false
+    /// The track-name column can fold to icons for more timeline width.
+    @AppStorage("editor.timeline.labelsCollapsed") var timelineLabelsCollapsed = false
     @State var timelineHoverLocation = EditorTimelineHoverLocation()
     // Only an explicit Option-cut target needs to update the ruler's controls.
     @State var hoveredTimelineCutPoint: CGPoint?
@@ -1089,19 +1091,19 @@ struct EditorTimelineView: View {
 
     var body: some View {
         let duration = max(timelineDuration, 0.001)
-        return VStack(spacing: 0) {
+        return EditorTimelineColumnLayout(labelWidth: timelineLabelWidth) { presentedLabelWidth in
+        VStack(spacing: 0) {
             timelineControls(duration: duration)
-            Divider()
-                .overlay(dividerColor)
-                .frame(height: timelineDividerHeight)
+            EditorFadingHairline(opacity: 0.08)
+                .frame(height: timelineDividerHeight, alignment: .center)
             GeometryReader { geometry in
-                let viewportWidth = max(geometry.size.width - timelineLabelWidth, 1)
+                let viewportWidth = max(geometry.size.width - presentedLabelWidth, 1)
                 let contentWidth = viewportWidth * CGFloat(timelineZoom)
 
                 ScrollView(.vertical, showsIndicators: true) {
                 HStack(alignment: .top, spacing: 0) {
                     timelineLabels
-                        .frame(width: timelineLabelWidth)
+                        .frame(width: presentedLabelWidth)
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         timelineCanvas(width: contentWidth, duration: duration)
@@ -1124,7 +1126,7 @@ struct EditorTimelineView: View {
                     }
                 }
                 .frame(height: timelineDocumentHeight, alignment: .top)
-                .background { timelineRowGrid }
+                .background { timelineRowGrid(labelWidth: presentedLabelWidth) }
                 .background { Color.clear.contentShape(Rectangle()).onTapGesture { clearTimelineSelection() } }
                 .overlay(alignment: .topLeading) {
                     NativeTimelinePlayheadView(
@@ -1132,8 +1134,9 @@ struct EditorTimelineView: View {
                         duration: duration,
                         part: .knob,
                         scrollView: timelineScrollView,
-                        leadingInset: timelineLabelWidth,
-                        documentWidth: contentWidth
+                        leadingInset: presentedLabelWidth,
+                        documentWidth: contentWidth,
+                        isEmphasized: gestureOwnership.activeIntent == .scrub
                     )
                     .frame(height: timelineCanvasHeight)
                     .allowsHitTesting(false)
@@ -1146,12 +1149,19 @@ struct EditorTimelineView: View {
             }
             .frame(height: timelineViewportHeight)
             HStack(spacing: 0) {
-                Color.clear.frame(width: timelineLabelWidth)
+                Color.clear.frame(width: presentedLabelWidth)
+                // A neutral navigator, only while zoomed in. At full view the
+                // whole timeline is already visible, so the bar (and its old
+                // coloured effect markers) was just noise along the bottom.
                 NativeTimelineOverviewView(
                     scrollView: timelineScrollView,
                     playbackController: playbackController,
                     duration: duration
                 )
+                .opacity(timelineZoom > 1.01 ? 1 : 0)
+                .allowsHitTesting(timelineZoom > 1.01)
+                .animation(.easeOut(duration: 0.2), value: timelineZoom > 1.01)
+                .accessibilityHidden(timelineZoom <= 1.01)
                 .accessibilityLabel("时间线总览")
                 .accessibilityValue(
                     "当前缩放 \(String(format: "%.1f", timelineZoom)) 倍；拖动可定位"
@@ -1161,6 +1171,8 @@ struct EditorTimelineView: View {
             .frame(height: timelineOverviewHeight)
 
         }
+        }
+        .animation(EditorSwapTiming.layout, value: timelineLabelsCollapsed)
         .frame(height: timelineHeight)
         .onChange(of: preferredPanelHeight, initial: true) { _, height in
             // Live window resizing must follow the pointer, without repeatedly
@@ -1169,7 +1181,7 @@ struct EditorTimelineView: View {
             lastHeightReportLayout = layout
             onPreferredHeightChange(height, animate)
         }
-        .background(EditorTheme.panelSurface)
+        // The floating island beneath supplies the lit material.
         // The parent freezes the preview raster during workspace reflow; the
         // timeline may animate its layout without issuing intermediate renders.
         .onChange(of: editorStore.project.timeline) { _, _ in

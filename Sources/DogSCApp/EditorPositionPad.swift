@@ -6,6 +6,8 @@ import SwiftUI
 /// single continuous interaction instead of exposing three competing paths.
 struct EditorPositionPad: View {
     @GestureState private var draggedPoint: NormalizedPoint?
+    @Environment(\.consolePalette) private var palette
+    @Environment(\.editorInsideTile) private var insideTile
     @State private var isCoordinateEditing = false
 
     let title: String
@@ -22,8 +24,8 @@ struct EditorPositionPad: View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 8) {
                 Text(appLocalized(title))
-                    .font(.appUI(.caption, weight: .semibold))
-                    .foregroundStyle(EditorTheme.chrome(0.84))
+                    .font(EditorTypography.controlLabel)
+                    .foregroundStyle(EditorTheme.primaryText)
 
                 Spacer(minLength: 8)
 
@@ -33,8 +35,8 @@ struct EditorPositionPad: View {
                         onEnded()
                     }
                 } label: {
-                    Label("居中", systemImage: "scope")
-                        .font(.appUI(.caption2, weight: .semibold))
+                    EditorSymbolLabel("居中", systemImage: "scope")
+                        .font(.appUI(size: 10, weight: .semibold))
                 }
                 .buttonStyle(.editorGhost)
                 .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous))
@@ -45,7 +47,7 @@ struct EditorPositionPad: View {
 
             if let detail {
                 Text(appLocalized(detail))
-                    .font(.appUI(.caption2))
+                    .font(.appUI(size: 10))
                     .foregroundStyle(EditorTheme.chrome(0.50))
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -53,7 +55,11 @@ struct EditorPositionPad: View {
             if compactLayout {
                 HStack(spacing: 18) {
                     positionSurface
-                    coordinateReadouts.frame(maxWidth: .infinity)
+                    VStack(alignment: .trailing, spacing: 10) {
+                        regionLabel
+                        coordinateReadouts
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             } else {
                 positionSurface
@@ -102,32 +108,13 @@ struct EditorPositionPad: View {
             let isDirectlyEditing = draggedPoint != nil || isCoordinateEditing
 
             ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                EditorTheme.chrome(0.045),
-                                EditorTheme.chrome(0.025),
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(
-                                isDirectlyEditing
-                                    ? EditorTheme.platinumAccent.opacity(0.22)
-                                    : EditorTheme.chrome(0.075),
-                                lineWidth: 0.75
-                            )
-                    }
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(insideTile ? EditorTheme.panelSurface : EditorTheme.chrome(isDirectlyEditing ? 0.065 : 0.045))
+                    .animation(SpringMotion.hover, value: isDirectlyEditing)
 
-                referenceGrid(
-                    size: proxy.size,
-                    inset: inset,
-                    usableWidth: usableWidth,
-                    usableHeight: usableHeight
+                anchorDots(
+                    inset: inset, usableWidth: usableWidth, usableHeight: usableHeight,
+                    nearest: nearestAnchor(displayedPoint)
                 )
 
                 if isDirectlyEditing {
@@ -138,40 +125,31 @@ struct EditorPositionPad: View {
                         path.addLine(to: CGPoint(x: inset + usableWidth, y: y))
                     }
                     .stroke(
-                        EditorTheme.platinumAccent.opacity(0.26),
+                        (palette?.stroke ?? EditorTheme.platinumAccent).opacity(0.5),
                         style: StrokeStyle(lineWidth: 0.75, dash: [2.5, 3.5])
                     )
                     .allowsHitTesting(false)
                 }
 
+                // One flat ink puck. It glides to a new position and follows
+                // the pointer exactly while it is being dragged.
                 ZStack {
                     Circle()
-                        .fill(
-                            EditorTheme.platinumAccent.opacity(
-                                isDirectlyEditing ? 0.20 : 0.09
-                            )
-                        )
-                        .frame(width: isDirectlyEditing ? 28 : 24, height: isDirectlyEditing ? 28 : 24)
-
+                        .fill((palette?.fill ?? EditorTheme.platinumAccent).opacity(isDirectlyEditing ? 0.18 : 0))
+                        .frame(width: 36, height: 36)
                     Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [EditorTheme.platinumAccent, EditorTheme.platinumAccent],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .frame(width: isDirectlyEditing ? 16 : 14, height: isDirectlyEditing ? 16 : 14)
-                        .overlay {
-                            Circle()
-                                .stroke(EditorTheme.chrome(0.78), lineWidth: 0.75)
-                        }
-                        .shadow(color: Color.black.opacity(0.42), radius: 3, y: 1.5)
+                        .fill(palette?.fill ?? EditorTheme.platinumAccent)
+                        .frame(width: 20, height: 20)
+                    Circle()
+                        .fill(palette?.ink ?? EditorTheme.onAccent)
+                        .frame(width: 6, height: 6)
                 }
+                .scaleEffect(isDirectlyEditing && !RecorderMotion.reduces ? 1.1 : 1)
+                .animation(SpringMotion.snappy, value: isDirectlyEditing)
                 .position(x: x, y: y)
-                .transaction { $0.animation = nil }
+                .animation(isDirectlyEditing ? nil : SpringMotion.fluid, value: point)
             }
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .updating($draggedPoint) { gesture, state, _ in
@@ -195,44 +173,61 @@ struct EditorPositionPad: View {
             .allowsHitTesting(!isCoordinateEditing)
             .accessibilityHidden(true)
         }
-        .frame(width: compactLayout ? 158 : 184, height: compactLayout ? 112 : 132)
+        .frame(width: compactLayout ? 158 : nil, height: compactLayout ? 112 : 128)
         .frame(maxWidth: compactLayout ? nil : .infinity)
     }
 
-    private func referenceGrid(
-        size: CGSize,
-        inset: CGFloat,
-        usableWidth: CGFloat,
-        usableHeight: CGFloat
+    /// Nine quiet dots mark where the position snaps; the nearest one wakes up.
+    private func anchorDots(
+        inset: CGFloat, usableWidth: CGFloat, usableHeight: CGFloat, nearest: (row: Int, column: Int)?
     ) -> some View {
         ZStack {
-            Path { path in
-                for fraction in [1.0 / 3.0, 2.0 / 3.0] {
-                    let x = inset + usableWidth * fraction
-                    let y = inset + usableHeight * fraction
-                    path.move(to: CGPoint(x: x, y: inset))
-                    path.addLine(to: CGPoint(x: x, y: inset + usableHeight))
-                    path.move(to: CGPoint(x: inset, y: y))
-                    path.addLine(to: CGPoint(x: inset + usableWidth, y: y))
-                }
+            ForEach(0..<9, id: \.self) { index in
+                let row = index / 3
+                let column = index % 3
+                let awake = nearest.map { $0.row == row && $0.column == column } ?? false
+                Circle()
+                    .fill(EditorTheme.chrome(awake ? 0.5 : 0.22))
+                    .frame(width: awake ? 7 : 4.5, height: awake ? 7 : 4.5)
+                    .position(
+                        x: inset + usableWidth * CGFloat(column) / 2,
+                        y: inset + usableHeight * CGFloat(row) / 2
+                    )
             }
-            .stroke(
-                EditorTheme.chrome(0.065),
-                style: StrokeStyle(lineWidth: 0.75, dash: [3, 4])
-            )
-
-            Path { path in
-                path.move(to: CGPoint(x: size.width / 2, y: inset))
-                path.addLine(to: CGPoint(x: size.width / 2, y: size.height - inset))
-                path.move(to: CGPoint(x: inset, y: size.height / 2))
-                path.addLine(to: CGPoint(x: size.width - inset, y: size.height / 2))
-            }
-            .stroke(
-                EditorTheme.platinumAccent.opacity(0.14),
-                style: StrokeStyle(lineWidth: 0.75, dash: [3, 4])
-            )
         }
+        .animation(SpringMotion.hover, value: nearest?.row)
+        .animation(SpringMotion.hover, value: nearest?.column)
         .allowsHitTesting(false)
+    }
+
+    private func nearestAnchor(_ point: NormalizedPoint) -> (row: Int, column: Int)? {
+        let steps = [0.0, 0.5, 1.0]
+        guard let column = steps.firstIndex(where: { abs(point.x - $0) < 0.04 }),
+              let row = steps.firstIndex(where: { abs(point.y - $0) < 0.04 }) else { return nil }
+        return (row, column)
+    }
+
+    private var regionName: String {
+        let names = [["左上", "上", "右上"], ["左", "居中", "右"], ["左下", "下", "右下"]]
+        guard let anchor = nearestAnchor(draggedPoint ?? point) else { return "自定义" }
+        return names[anchor.row][anchor.column]
+    }
+
+    private var regionLabel: some View {
+        ZStack(alignment: .trailing) {
+            Text(appLocalized(regionName))
+                .id(regionName)
+                .transition(.asymmetric(
+                    insertion: .offset(y: 16).combined(with: .opacity),
+                    removal: .offset(y: -16).combined(with: .opacity)
+                ))
+        }
+        .font(.appUI(size: 22, weight: .semibold))
+        .foregroundStyle(EditorTheme.primaryText)
+        .frame(height: 28, alignment: .trailing)
+        .clipped()
+        .animation(RecorderMotion.reduces ? nil : .spring(response: 0.45, dampingFraction: 0.8), value: regionName)
+        .accessibilityHidden(true)
     }
 
     private var isCentered: Bool {

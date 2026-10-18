@@ -15,17 +15,19 @@ extension EditorTimelineView {
     }
 
     var cameraSyncTimelineHeight: CGFloat { 62 }
-    var motionTimelineHeight: CGFloat { layout.value(regular: 56, compact: 44) }
-    var zoomTimelineHeight: CGFloat { layout.value(regular: 56, compact: 44) }
-    var zoomBarHeight: CGFloat { layout.value(regular: 42, compact: 32) }
+    var motionTimelineHeight: CGFloat { layout.value(regular: 44, compact: 40) }
+    var zoomTimelineHeight: CGFloat { layout.value(regular: 44, compact: 40) }
+    var zoomBarHeight: CGFloat { layout.value(regular: 30, compact: 28) }
     var overlayTimelineHeight: CGFloat {
         max(CGFloat(max(overlayTimelineRows.count, 1) * 34 + 16), motionTimelineHeight)
     }
-    var timelineRulerHeight: CGFloat { layout.value(regular: 44, compact: 32) }
-    var timelineControlsHeight: CGFloat { layout.value(regular: 68, compact: 52) }
+    var timelineRulerHeight: CGFloat { layout.value(regular: 32, compact: 28) }
+    var timelineControlsHeight: CGFloat { layout.value(regular: 44, compact: 40) }
     var timelineOverviewHeight: CGFloat { layout.value(regular: 20, compact: 16) }
     var timelineDividerHeight: CGFloat { 1 }
-    var timelineLabelWidth: CGFloat { layout.value(regular: 156, compact: 124) }
+    var timelineLabelWidth: CGFloat {
+        timelineLabelsCollapsed ? 52 : layout.value(regular: 156, compact: 128)
+    }
     var preferredPanelHeight: CGFloat {
         timelineCanvasHeight + timelineControlsHeight + timelineOverviewHeight + timelineDividerHeight
     }
@@ -33,7 +35,7 @@ extension EditorTimelineView {
     var primaryTimelineHeight: CGFloat { primaryVideoHeight + 12 }
     var waveformContentHeight: CGFloat { primaryVideoHeight }
     // Display mode changes the contents, never the workspace geometry.
-    var primaryVideoHeight: CGFloat { layout.value(regular: 96, compact: 72) }
+    var primaryVideoHeight: CGFloat { layout.value(regular: 64, compact: 52) }
     var timelineViewportHeight: CGFloat {
         max(panelHeight - timelineControlsHeight - timelineOverviewHeight - timelineDividerHeight, 80)
     }

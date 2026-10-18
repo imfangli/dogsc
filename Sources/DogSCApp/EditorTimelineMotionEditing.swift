@@ -75,7 +75,7 @@ var screenMotionTimelineClips: [EditorMotionTimelineClip] {
 
                 if touchesPrevious {
                     Rectangle()
-                        .fill(Color.black.opacity(0.55))
+                        .fill(EditorTheme.panelSurface)
                         .frame(width: 1.5, height: 24)
                         .offset(x: startX - 0.75)
                         .allowsHitTesting(false)
@@ -83,38 +83,30 @@ var screenMotionTimelineClips: [EditorMotionTimelineClip] {
 
                 ZStack {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    motionTrackColor(track).opacity(0.72),
-                                    motionTrackColor(track).opacity(0.96),
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
+                        // One flat wash of the lane's hue, like the zoom lane.
+                        .fill(motionTrackPalette(track).timelineSurface(emphasis))
                         .overlay {
                             if clipWidth > 72 {
                                 HStack(spacing: 5) {
-                                    Image(systemName: track == .screen ? "move.3d" : "video.badge.ellipsis")
+                                    EditorSymbol(track == .screen ? "move.3d" : "video.badge.ellipsis", size: 14)
                                     Text("过渡 \(index + 1)")
                                     if clipWidth > 116 {
                                         Text(timelineTimestamp(clip.timing.duration))
-                                            .foregroundStyle(EditorTheme.chrome(0.7))
                                     }
                                 }
                                 .font(.appUI(size: 10, weight: .semibold))
+                                .foregroundStyle(motionTrackInk(track))
                                 .lineLimit(1)
                                 .padding(.horizontal, 9)
                             }
                         }
-                        .editorTimelineClipChrome(cornerRadius: 6, emphasis: emphasis)
+                        .editorTimelineClipChrome(cornerRadius: 6, emphasis: emphasis, tint: motionTrackPalette(track).stroke)
 
                     if emphasis.showsHandles {
                         HStack(spacing: 0) {
-                            motionResizeHandle(leading: true)
+                            motionResizeHandle(leading: true, track: track)
                             Spacer(minLength: 0)
-                            motionResizeHandle(leading: false)
+                            motionResizeHandle(leading: false, track: track)
                         }
                         .padding(.horizontal, 0.5)
                         .opacity(emphasis.handleOpacity)
@@ -122,7 +114,9 @@ var screenMotionTimelineClips: [EditorMotionTimelineClip] {
                     }
                 }
                 .frame(width: clipWidth, height: 36)
+                .editorClipDragFeedback(motionTrackDrag == .move(clip.id) && motionGestureOrigin?.clip.track == clip.track)
                 .offset(x: startX)
+                .transition(.identity)
                 .zIndex(emphasis == .editing ? 4 : selected ? 3 : hovered ? 1 : 0)
                 .contentShape(Rectangle())
                 .contextMenu {
@@ -131,7 +125,7 @@ var screenMotionTimelineClips: [EditorMotionTimelineClip] {
                     Button(role: .destructive) {
                         removeMotionClip(clip)
                     } label: {
-                        Label("删除动画", systemImage: "trash")
+                        EditorSymbolLabel("删除动画", systemImage: "trash")
                     }
                 }
                 .onHover { hovering in
@@ -146,7 +140,8 @@ var screenMotionTimelineClips: [EditorMotionTimelineClip] {
                 .help("单击选中；拖动移动过渡；拖两端调整时长；右键可删除")
                 .accessibilityLabel(String(format: appLocalized(track == .screen ? "屏幕 3D %d" : "摄像运动 %d"), index + 1))
                 .accessibilityValue(
-                    "\(timelineTimestamp(clip.timing.startTime)) 至 \(timelineTimestamp(clip.timing.endTime))"
+                    String(format: appLocalized("%@ 至 %@"),
+                           timelineTimestamp(clip.timing.startTime), timelineTimestamp(clip.timing.endTime))
                 )
                 .accessibilityAddTraits(
                     selected ? [.isButton, .isSelected] : .isButton
@@ -170,9 +165,9 @@ var screenMotionTimelineClips: [EditorMotionTimelineClip] {
                 width: width,
                 duration: duration
             ) {
-                Image(systemName: "plus")
-                    .font(.appUI(size: 9, weight: .bold))
-                    .foregroundStyle(.white)
+                EditorSymbol("plus", size: 11.5)
+                    .font(.appUI(size: 10, weight: .bold))
+                    .foregroundStyle(motionTrackPalette(track).ink)
                     .frame(width: 16, height: 16)
                     .background(Circle().fill(motionTrackColor(track)))
                     .offset(x: indicatorX - 8)
@@ -185,10 +180,10 @@ var screenMotionTimelineClips: [EditorMotionTimelineClip] {
                 let startX = CGFloat(start / max(duration, 0.001)) * width
                 let rangeWidth = max(CGFloat((end - start) / max(duration, 0.001)) * width, 4)
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(motionTrackColor(track).opacity(0.42))
+                    .fill(motionTrackPalette(track).timelineSurface(.hovered))
                     .overlay(
                         RoundedRectangle(cornerRadius: 6)
-                            .stroke(EditorTheme.chrome(0.8), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            .stroke(motionTrackPalette(track).stroke, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                     )
                     .frame(width: rangeWidth, height: 36)
                     .offset(x: startX)
@@ -231,18 +226,26 @@ var screenMotionTimelineClips: [EditorMotionTimelineClip] {
         }
     }
 
-    func motionResizeHandle(leading: Bool) -> some View {
+    func motionResizeHandle(leading: Bool, track: EditorMotionTimelineTrack) -> some View {
         Capsule(style: .continuous)
-            .fill(EditorTheme.chrome(0.94))
-            .frame(width: 3, height: 26)
+            .fill(motionTrackPalette(track).stroke)
+            .frame(width: 3, height: 14)
             .accessibilityLabel(appLocalized(leading ? "调整动画开始" : "调整动画结束"))
     }
 
-    func motionTrackColor(_ track: EditorMotionTimelineTrack) -> Color {
+    func motionTrackPalette(_ track: EditorMotionTimelineTrack) -> EditorConsolePalette {
         switch track {
-        case .screen: return Color(red: 0.85, green: 0.58, blue: 0.24)
-        case .camera: return Color(red: 0.43, green: 0.67, blue: 0.47)
+        case .screen: EditorConsole.Track.screenMotion
+        case .camera: EditorConsole.Track.cameraMotion
         }
+    }
+
+    func motionTrackColor(_ track: EditorMotionTimelineTrack) -> Color {
+        motionTrackPalette(track).fill
+    }
+
+    func motionTrackInk(_ track: EditorMotionTimelineTrack) -> Color {
+        motionTrackPalette(track).softInk
     }
 
     func isMotionClipSelected(_ clip: EditorMotionTimelineClip) -> Bool {
@@ -280,6 +283,7 @@ var screenMotionTimelineClips: [EditorMotionTimelineClip] {
     ) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                EditorDragFrameCoalescer.shared.submit {
                 if motionTrackDrag == nil {
                     beginMotionTrackDrag(
                         at: value.startLocation,
@@ -350,7 +354,9 @@ var screenMotionTimelineClips: [EditorMotionTimelineClip] {
                     break
                 }
             }
+}
             .onEnded { value in
+                EditorDragFrameCoalescer.shared.flush()
                 let drag = motionTrackDrag
                 let create = motionCreateDrag
                 let origin = motionGestureOrigin
@@ -371,9 +377,7 @@ var screenMotionTimelineClips: [EditorMotionTimelineClip] {
                         requested.end = requested.start + 3
                     }
                     playbackController.pause()
-                    withAnimation(SpringMotion.fluid) {
-                        createManualMotionClip(drag: requested, duration: duration)
-                    }
+                    createManualMotionClip(drag: requested, duration: duration)
                     endTimelineGesture(.motionCreate(track))
                 case let .move(id):
                     let intent = EditorTimelineGestureIntent.motion(
@@ -968,11 +972,16 @@ var screenMotionTimelineClips: [EditorMotionTimelineClip] {
         at time: TimeInterval,
         defaultLeadIn: TimeInterval = 0.7
     ) -> (left: TransitionTiming, right: TransitionTiming, splitTime: TimeInterval)? {
+        // A split is exactly at the playhead. Reject positions that would
+        // leave a shorter-than-supported piece instead of silently moving
+        // the cut away from the position shown to the user. The tolerance
+        // only covers frame-grid floating-point rounding at the limit.
+        let minimumPieceDuration: TimeInterval = 0.05
+        let tolerance: TimeInterval = 0.000_1
         guard time.isFinite,
-              time >= timing.startTime,
-              time <= timing.endTime else { return nil }
-        let t = min(max(time, timing.startTime + 0.05), timing.endTime - 0.05)
-        guard t > timing.startTime + 0.000_1, t < timing.endTime - 0.000_1 else { return nil }
+              time - timing.startTime >= minimumPieceDuration - tolerance,
+              timing.endTime - time >= minimumPieceDuration - tolerance else { return nil }
+        let t = time
         var left = timing
         left.preserveTransitionIntent()
         left.duration = t - timing.startTime

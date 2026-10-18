@@ -79,7 +79,7 @@ extension EditorView {
                 Button {
                     showsScenePresetPopover = false
                     beginSavingScenePreset()
-                } label: { Image(systemName: "plus").frame(width: 30, height: 30) }
+                } label: { EditorSymbol("plus", size: 14).frame(width: 30, height: 30) }
                 .buttonStyle(EditorSoftRaisedButtonStyle()).help("另存为新预设")
                 .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .accessibilityLabel("另存为新预设")
@@ -93,17 +93,23 @@ extension EditorView {
                                 requestScenePresetApplication(preset)
                             } label: {
                                 HStack(spacing: 10) {
-                                    Image(systemName: "rectangle.3.group")
+                                    EditorSymbol("rectangle.3.group", size: 14)
+                                        .foregroundStyle(preset.id == activeStylePresetID ? EditorTheme.primaryText : EditorTheme.secondaryText)
+                                        .frame(width: 28, height: 28)
+                                        .background(
+                                            preset.id == activeStylePresetID ? EditorTheme.selectionWash : EditorTheme.chrome(0.06),
+                                            in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.compact, style: .continuous)
+                                        )
                                         .accessibilityHidden(true)
                                     Text(preset.name).lineLimit(1).truncationMode(.middle)
                                     Spacer(minLength: 8)
                                     if preset.id == activeStylePresetID {
-                                        Image(systemName: "checkmark").foregroundStyle(EditorTheme.selectionTint)
+                                        EditorSymbol("checkmark", size: 14).foregroundStyle(EditorTheme.primaryText)
                                             .accessibilityHidden(true)
                                     }
                                 }.font(.appUI(size: 13, weight: .medium))
                                     .padding(12).contentShape(Rectangle())
-                            }.buttonStyle(.editorToolbarPress)
+                            }.buttonStyle(EditorToolbarPressButtonStyle(cornerRadius: EditorInterfaceRadius.control))
                                 .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                                 .accessibilityLabel(preset.name)
                                 .accessibilityAddTraits(preset.id == activeStylePresetID ? .isSelected : [])
@@ -111,7 +117,7 @@ extension EditorView {
                                 Button {
                                     setDefaultScenePreset(defaultStylePresetID == preset.id ? nil : preset.id)
                                 } label: {
-                                    Label(appLocalized(defaultStylePresetID == preset.id ? "新录制默认" : "设为新录制默认"),
+                                    EditorSymbolLabel(appLocalized(defaultStylePresetID == preset.id ? "新录制默认" : "设为新录制默认"),
                                           systemImage: defaultStylePresetID == preset.id ? "checkmark.circle.fill" : "circle")
                                     .padding(.horizontal, 4).frame(height: 26)
                                 }.buttonStyle(.editorToolbarPress)
@@ -119,7 +125,7 @@ extension EditorView {
                                 Spacer(minLength: 4)
                                 Button {
                                     deleteStylePreset(preset)
-                                } label: { Image(systemName: "trash").frame(width: 26, height: 24) }
+                                } label: { EditorSymbol("trash", size: 14).frame(width: 26, height: 24) }
                                 .buttonStyle(.editorToolbarPress).help(String(format: appLocalized("删除预设：%@"), preset.name))
                                 .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                                 .accessibilityLabel(String(format: appLocalized("删除预设：%@"), preset.name))
@@ -127,11 +133,11 @@ extension EditorView {
                             .font(.appUI(size: 11)).foregroundStyle(EditorTheme.popoverSecondaryText)
                             .padding(.horizontal, 8).padding(.bottom, 8)
                         }
-                        .background(preset.id == activeStylePresetID ? EditorTheme.popoverSelectionSurface : EditorTheme.groupSurface,
+                        .background(EditorTheme.cardFill,
                                     in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.group, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: EditorInterfaceRadius.group, style: .continuous)
-                                .strokeBorder(EditorTheme.chrome(preset.id == activeStylePresetID ? 0.14 : 0.055), lineWidth: 0.75)
+                                .strokeBorder(EditorTheme.platinumAccent.opacity(preset.id == activeStylePresetID ? 1 : 0), lineWidth: 1.5)
                                 .allowsHitTesting(false)
                         }
                     }
@@ -144,7 +150,7 @@ extension EditorView {
                     showsScenePresetPopover = false
                     beginSavingScenePreset(updating: active)
                 } label: {
-                    Label("更新此预设…", systemImage: "arrow.triangle.2.circlepath")
+                    EditorSymbolLabel("更新此预设…", systemImage: "arrow.triangle.2.circlepath")
                         .font(.appUI(size: 13)).frame(maxWidth: .infinity).frame(height: 36)
                 }.buttonStyle(EditorSoftRaisedButtonStyle())
                     .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.control, style: .continuous))
@@ -163,7 +169,7 @@ extension EditorView {
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
                 if scenePresetIsModified {
-                    Image(systemName: "circle.fill")
+                    EditorSymbol("circle.fill", size: 9)
                         .font(.appUI(size: 5))
                         .foregroundStyle(EditorTheme.amberAccent)
                         .accessibilityLabel("已修改")

@@ -60,6 +60,10 @@ final class EditorTimelineMagneticSnap: ObservableObject {
         }
         guard let best else { return proposed }
         heldOffset = best.offset
+        if targetTime != best.time {
+            // The alignment tick a Force Touch trackpad gives Finder and Keynote.
+            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+        }
         targetTime = best.time
         return best.time - best.offset
     }
@@ -145,14 +149,37 @@ extension EditorTimelineView {
 
     @ViewBuilder
     func magneticGuide(width: CGFloat, duration: TimeInterval) -> some View {
-        if let time = timelineSnap.targetTime {
-            Rectangle().fill(EditorTheme.selectionTint.opacity(0.8))
+        // Only while something is being dragged: a target left over from the
+        // last gesture must not stay drawn over the playhead.
+        if let time = timelineSnap.targetTime,
+           gestureOwnership.activeIntent != nil || draggedPrimarySegmentID != nil {
+            Rectangle().fill(EditorConsole.Track.primary.stroke.opacity(0.8))
                 .frame(width: 1, height: timelineCanvasHeight)
                 .overlay(alignment: .top) {
-                    Circle().fill(EditorTheme.selectionTint).frame(width: 5, height: 5)
+                    EditorSnapPulse(color: EditorConsole.Track.primary.stroke).id(time)
                 }
                 .offset(x: CGFloat(time / max(duration, 0.001)) * width - 0.5)
                 .allowsHitTesting(false).accessibilityHidden(true).zIndex(40)
+        }
+    }
+}
+
+/// The magnet's dot lands with a small pulse each time it catches a new edge.
+private struct EditorSnapPulse: View {
+    let color: Color
+    @State private var landed = false
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(color.opacity(landed ? 0 : 0.6), lineWidth: 1.5)
+                .frame(width: landed ? 18 : 5, height: landed ? 18 : 5)
+            Circle().fill(color).frame(width: 6, height: 6)
+        }
+        .frame(width: 18, height: 18)
+        .offset(y: -6)
+        .onAppear {
+            guard !RecorderMotion.reduces else { landed = true; return }
+            withAnimation(.easeOut(duration: 0.45)) { landed = true }
         }
     }
 }

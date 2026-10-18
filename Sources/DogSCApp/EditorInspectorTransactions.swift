@@ -78,6 +78,19 @@ enum EditorSliderValueFormat: Equatable, Hashable, Sendable {
         return self == .percent ? raw / 100 : raw
     }
 
+    /// Compact readout used everywhere a value is shown: no trailing zeros
+    /// ("0.7s", "1.25×", "2×"), with a unit glued on.
+    static func compact(_ value: Double, unit: String = "", digits: Int = 2) -> String {
+        guard value.isFinite else { return "–" }
+        var text = String(format: "%.\(digits)f", value)
+        if text.contains(".") {
+            while text.hasSuffix("0") { text.removeLast() }
+            if text.hasSuffix(".") { text.removeLast() }
+        }
+        if text == "-0" { text = "0" }
+        return text + unit
+    }
+
     /// Up to two decimals, trailing zeros stripped ("1.60" → "1.6").
     private static func trimmed(_ value: Double) -> String {
         let raw = String(format: "%.2f", value)
@@ -195,38 +208,51 @@ func updateEditorContinuousInteraction(
     }
 }
 
-/// Repositions the same controls so resizing does not replace an active
-/// readout or cancel its text draft.
+/// One property per line: name, slider and value share fixed columns, so
+/// every parameter in every page lines up on the same vertical edges.
+/// Repositioning (not replacing) keeps an active text draft alive.
+enum EditorPropertyRowMetrics {
+    static let labelWidth: CGFloat = 72
+    static let valueWidth: CGFloat = 56
+    static let gap: CGFloat = 12
+    static let height: CGFloat = 32
+}
+
 private struct EditorSliderRowLayout: Layout {
     var compact: Bool
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        CGSize(width: proposal.width ?? 320, height: compact ? 32 : 66)
+        CGSize(width: proposal.width ?? 320, height: EditorPropertyRowMetrics.height)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard subviews.count == 3 else { return }
-        let readoutWidth: CGFloat = 66
-        let gap: CGFloat = 12
-        let titleWidth = compact
-            ? min(subviews[0].sizeThatFits(.unspecified).width, max((bounds.width - readoutWidth - gap * 2) / 2, 0))
-            : max(bounds.width - readoutWidth - gap, 0)
+        let m = EditorPropertyRowMetrics.self
+        let labelWidth = min(m.labelWidth, max(bounds.width * 0.3, 0))
         subviews[0].place(
-            at: CGPoint(x: bounds.minX, y: bounds.minY + 16), anchor: .leading,
-            proposal: ProposedViewSize(width: titleWidth, height: 32)
+            at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading,
+            proposal: ProposedViewSize(width: labelWidth, height: m.height)
         )
         subviews[1].place(
-            at: CGPoint(x: bounds.maxX - readoutWidth, y: bounds.minY), anchor: .topLeading,
-            proposal: ProposedViewSize(width: readoutWidth, height: 32)
+            at: CGPoint(x: bounds.maxX - m.valueWidth, y: bounds.minY), anchor: .topLeading,
+            proposal: ProposedViewSize(width: m.valueWidth, height: m.height)
         )
-        let sliderX = compact ? titleWidth + gap : 0
+        let sliderX = bounds.minX + labelWidth + m.gap
         subviews[2].place(
-            at: CGPoint(x: bounds.minX + sliderX, y: bounds.minY + (compact ? 0 : 34)), anchor: .topLeading,
+            at: CGPoint(x: sliderX, y: bounds.minY), anchor: .topLeading,
             proposal: ProposedViewSize(
-                width: max(bounds.width - sliderX - (compact ? readoutWidth + gap : 0), 0), height: 32
+                width: max(bounds.maxX - m.valueWidth - m.gap - sliderX, 0), height: m.height
             )
         )
     }
+}
+
+/// How a slider row draws its parameter. A bar suits a quantity that reads as
+/// an extent (a duration, a size, an opacity); the slim rail stays for expert
+/// tuning rows where only the number matters.
+enum EditorSliderRowStyle {
+    case bar
+    case slim
 }
 
 struct EditorTransactionalSliderRow: View {
@@ -238,6 +264,7 @@ struct EditorTransactionalSliderRow: View {
     var format: EditorSliderValueFormat = .decimal2
     var accessibilityTitle: String? = nil
     var compact: Bool = false
+    var style: EditorSliderRowStyle = .bar
     let onError: (String) -> Void
     @State private var isSliderEditing = false
     @State private var isTextEditing = false
@@ -246,11 +273,57 @@ struct EditorTransactionalSliderRow: View {
     private var parameterTitle: String { accessibilityTitle ?? title }
 
     var body: some View {
+        switch style {
+        case .bar: barBody
+        case .slim: slimBody
+        }
+    }
+
+    /// The parameter as an extent: its name above, then a bar with the value
+    /// written inside it.
+    private var barBody: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(appLocalized(title))
+                .font(.appUI(size: 13))
+                .foregroundStyle(EditorTheme.secondaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .accessibilityHidden(true)
+            EditorBarSlider(
+                title: title,
+                value: value.wrappedValue,
+                range: range,
+                format: format,
+                accessibilityTitle: accessibilityTitle,
+                isTextEditing: $isTextEditing,
+                edit: EditorInspectorParameterEditConfiguration(
+                    draftText: format.editingText(for: value.wrappedValue),
+                    onBegin: beginTextEditing,
+                    onPreview: previewTextValue,
+                    onCommit: commitTextEditing,
+                    onCancel: cancelTextEditing
+                ),
+                onBegin: { _ = editorStore.beginContinuousInteraction(commandScope: commandScope) },
+                onChange: { value.wrappedValue = $0 },
+                onEnd: {
+                    updateEditorContinuousInteraction(
+                        store: editorStore, isEditing: false, commandScope: commandScope,
+                        actionName: title, onError: onError
+                    )
+                }
+            )
+        }
+    }
+
+    /// The quiet rail with the number at the right, for expert tuning rows.
+    private var slimBody: some View {
         EditorSliderRowLayout(compact: compact) {
             Text(appLocalized(title))
-                .font(.appUI(size: 13, weight: .regular))
-                .foregroundStyle(EditorTheme.chrome(0.76))
+                .font(.appUI(size: 13))
+                .foregroundStyle(EditorTheme.secondaryText)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityHidden(true)
             EditorInspectorParameterReadout(
                 title: parameterTitle,
@@ -266,7 +339,7 @@ struct EditorTransactionalSliderRow: View {
                 showsTitle: false,
                 isEmbedded: false
             )
-            .frame(width: 66, height: 32)
+            .frame(width: EditorPropertyRowMetrics.valueWidth, height: 32, alignment: .trailing)
             EditorTransactionalSlider(
                 editorStore: editorStore,
                 value: value,

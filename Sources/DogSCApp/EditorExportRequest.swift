@@ -395,10 +395,10 @@ enum EditorExportRequestBuilder {
             let frameRate = project.exportSettings.frameRate
             baseName = projectName.map {
                 "\($0)-\(frameRate.rawValue)fps"
-            } ?? "成片-\(formatter.string(from: Date()))-\(frameRate.rawValue)fps"
+            } ?? "\(appLocalized("成片"))-\(formatter.string(from: Date()))-\(frameRate.rawValue)fps"
         case .audio:
-            baseName = projectName.map { "\($0)-音频" }
-                ?? "音频-\(formatter.string(from: Date()))"
+            baseName = projectName.map { "\($0)-\(appLocalized("音频"))" }
+                ?? "\(appLocalized("音频"))-\(formatter.string(from: Date()))"
         }
         return try makeOutputURL(
             in: folder,

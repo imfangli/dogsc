@@ -18,19 +18,19 @@ struct EditorScenePresetSheet: View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(appLocalized(isUpdating ? "更新场景预设" : "保存场景预设"))
-                    .font(.appUI(.title2, weight: .semibold))
+                    .font(.appUI(size: 17, weight: .semibold))
                 Text("把这套配置留给下一次录制。")
                     .foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 7) {
-                Text("预设名称").font(.appUI(.callout, weight: .medium))
+                Text("预设名称").font(.appUI(size: 12, weight: .medium))
                 TextField("例如：全屏上下裁切", text: $name)
                     .textFieldStyle(.roundedBorder)
                     .focused($nameFocused)
                     .disabled(isSaving)
                 if nameConflict {
                     Text("这个名称已存在，请换一个名称；更新已有预设请使用“更新此预设”。")
-                        .font(.appUI(.caption))
+                        .font(.appUI(size: 11))
                         .foregroundStyle(EditorTheme.recording)
                 }
             }
@@ -42,25 +42,24 @@ struct EditorScenePresetSheet: View {
                     Text(sceneCropSummary(project.canvas.crop, size: sourceSize))
                         .monospacedDigit()
                 }
-                .font(.appUI(.caption))
+                .font(.appUI(size: 11))
                 configurationRow("person.crop.rectangle", "摄像头", "显隐、布局、形状、外观与蒙版取景")
                 configurationRow("cursorarrow.motionlines", "光标与运镜", "光标效果、开场与新动画默认值")
                 configurationRow("speaker.wave.2", "声音与背景", "全片音量、静音和背景资源副本")
             }
             .padding(16)
-            .background(EditorTheme.groupSurface, in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.group, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: EditorInterfaceRadius.group, style: .continuous).strokeBorder(EditorTheme.hairline, lineWidth: 0.75))
+            .background(EditorTheme.cardFill, in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.tile, style: .continuous))
             Text("保留当前项目的素材、剪辑、分段声音和时间线动画。新录制默认场景可在预设菜单中单独选择。")
-                .font(.appUI(.caption))
+                .font(.appUI(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let error {
-                Text(error).font(.appUI(.caption)).foregroundStyle(EditorTheme.recording)
+                Text(error).font(.appUI(size: 11)).foregroundStyle(EditorTheme.recording)
             }
             HStack(spacing: 10) {
                 if isSaving {
                     ProgressView().controlSize(.small)
-                    Text("正在保存背景与配置…").font(.appUI(.caption)).foregroundStyle(.secondary)
+                    Text("正在保存背景与配置…").font(.appUI(size: 11)).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("取消", action: onCancel)
@@ -85,10 +84,10 @@ struct EditorScenePresetSheet: View {
 
     private func configurationRow(_ icon: String, _ title: LocalizedStringKey, _ detail: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon).frame(width: 18).foregroundStyle(.secondary)
+            EditorSymbol(icon, size: 14).frame(width: 18).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.appUI(.callout, weight: .medium))
-                Text(detail).font(.appUI(.caption)).foregroundStyle(.secondary)
+                Text(title).font(.appUI(size: 12, weight: .medium))
+                Text(detail).font(.appUI(size: 11)).foregroundStyle(.secondary)
             }
         }
     }
@@ -107,15 +106,15 @@ struct EditorScenePresetPreview: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("检查裁切适配").font(.appUI(.title2, weight: .semibold))
-                Text(preset.name).font(.appUI(.callout)).foregroundStyle(.secondary)
+                Text("检查裁切适配").font(.appUI(size: 17, weight: .semibold))
+                Text(preset.name).font(.appUI(size: 12)).foregroundStyle(.secondary)
             }
             if let source = preset.sourceDimensions {
                 Text("\(source.width) × \(source.height) → \(Int(sourceSize.width)) × \(Int(sourceSize.height))")
                     .font(.callout.monospacedDigit())
             }
             Text("录制尺寸不同，裁切将按比例适配。亮框内的画面会保留。")
-                .font(.appUI(.callout)).foregroundStyle(.secondary)
+                .font(.appUI(size: 12)).foregroundStyle(.secondary)
             GeometryReader { proxy in
                 let crop = preset.canvas.crop.clamped()
                 let rect = CGRect(x: crop.x * proxy.size.width, y: crop.y * proxy.size.height,
@@ -134,7 +133,7 @@ struct EditorScenePresetPreview: View {
                             .position(x: rect.midX, y: rect.midY)
                     } else if thumbnailFinished {
                         Text("预览暂不可用，可取消后稍后重试。")
-                            .font(.appUI(.caption)).foregroundStyle(.white)
+                            .font(.appUI(size: 11)).foregroundStyle(.white)
                     } else {
                         ProgressView().tint(.white)
                     }
@@ -149,7 +148,7 @@ struct EditorScenePresetPreview: View {
             Text(sceneCropSummary(preset.canvas.crop, size: sourceSize))
                 .font(.callout.monospacedDigit())
             Text("应用后可一次撤销，素材与时间线片段保持原样。")
-                .font(.appUI(.caption)).foregroundStyle(.secondary)
+                .font(.appUI(size: 11)).foregroundStyle(.secondary)
             HStack {
                 Spacer()
                 Button("取消", action: onCancel).keyboardShortcut(.cancelAction).buttonStyle(.editorQuiet)

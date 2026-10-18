@@ -27,7 +27,7 @@ extension EditorInspectorView {
             where: { $0.id == id }
         ) {
             VStack(alignment: .leading, spacing: 14) {
-                EditorInspectorSection("柔化效果") {
+                EditorInspectorSection("区域效果") {
                     EditorSegmentedControl(
                         options: [MosaicEffectStyle.blur, MosaicEffectStyle.spotlight],
                         title: { $0 == .blur ? "柔化" : "突出" },
@@ -119,14 +119,14 @@ extension EditorInspectorView {
                             updateMosaicPositionDraft(id: id, point: point)
                         },
                         onEnded: {
-                            commitOverlayDraft(actionName: "移动打码区域")
+                            commitOverlayDraft(actionName: "移动效果区域")
                         },
                         onCancelled: { editorStore.cancelInteraction() },
                         onTextPreviewValidityChanged: {
                             updateEditorTextPreviewValidity(
                                 store: editorStore, isValid: $0,
                                 commandScope: .selection, selection: .mosaic(id),
-                                actionName: "移动打码区域"
+                                actionName: "移动效果区域"
                             )
                         },
                         snapsToGrid: false
@@ -135,7 +135,7 @@ extension EditorInspectorView {
                     overlaySlider("高度", value: mosaicRectBinding(id: id, keyPath: \.height, fallback: clip.sourceRect.height), range: 0.01...1, format: .percent)
                 }
 
-                removeOverlayButton(title: "删除柔化")
+                removeOverlayButton(title: clip.style == .spotlight ? "删除突出" : "删除柔化")
             }
         } else {
             missingOverlayView
@@ -210,7 +210,7 @@ extension EditorInspectorView {
                             format: appLocalized("当前第 %lld 层，共 %lld 层"),
                             Int64(state.rank + 1), Int64(state.count)
                         ))
-                            .font(.appUI(.caption2))
+                            .font(.appUI(size: 10))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -239,11 +239,11 @@ extension EditorInspectorView {
 
                 EditorInspectorSection("背景处理") {
                     if clip.hidesScreen {
-                        Label("仅保留画布背景与贴图", systemImage: "rectangle.slash")
-                            .font(.appUI(.caption, weight: .semibold))
+                        EditorSymbolLabel("仅保留画布背景与贴图", systemImage: "rectangle.slash")
+                            .font(.appUI(size: 11, weight: .semibold))
                             .foregroundStyle(EditorTheme.chrome(0.78))
-                        Text("录屏画面已隐藏，录屏虚化不会再让画布背景变得雾蒙蒙；画布自身设置的壁纸模糊仍会保留。")
-                            .font(.appUI(.caption2))
+                        Text("录屏已隐藏，只保留画布自身的壁纸模糊。").help(appLocalized("录屏画面已隐藏，录屏虚化不会再让画布背景变得雾蒙蒙；画布自身设置的壁纸模糊仍会保留。"))
+                            .font(.appUI(size: 10))
                             .foregroundStyle(EditorTheme.chrome(0.50))
                             .fixedSize(horizontal: false, vertical: true)
                     } else {
@@ -275,15 +275,12 @@ extension EditorInspectorView {
                         ),
                         title: "贴图期间隐藏摄像头"
                     )
-                    Text("隐藏与虚化会跟随贴图的入场和退场曲线，不会突然切换。")
-                        .font(.appUI(.caption2))
-                        .foregroundStyle(EditorTheme.chrome(0.50))
                 }
 
                 EditorInspectorSection("出入场") {
                     VStack(alignment: .leading, spacing: 7) {
                         Text("动效节奏")
-                            .font(.appUI(.caption2, weight: .semibold))
+                            .font(.appUI(size: 10, weight: .semibold))
                             .foregroundStyle(EditorTheme.chrome(0.62))
                         EditorTileSelector(
                             options: ElementMotionCurve.allCases,
@@ -296,13 +293,6 @@ extension EditorInspectorView {
                             ),
                             columnCount: 3
                         )
-                        Text(
-                            appLocalized(clip.animationCurve.editorDetail) + " "
-                                + appLocalized("同时影响入场与退场，方向和时长仍可分别调整。")
-                        )
-                            .font(.appUI(.caption2))
-                            .foregroundStyle(EditorTheme.chrome(0.48))
-                            .fixedSize(horizontal: false, vertical: true)
                     }
 
                     Divider()
@@ -310,7 +300,7 @@ extension EditorInspectorView {
 
                     VStack(alignment: .leading, spacing: 7) {
                         Text("入场方式")
-                            .font(.appUI(.caption2, weight: .semibold))
+                            .font(.appUI(size: 10, weight: .semibold))
                             .foregroundStyle(EditorTheme.chrome(0.62))
                         EditorTileSelector(
                             options: StickerAnimationPreset.allCases,
@@ -341,7 +331,7 @@ extension EditorInspectorView {
 
                     VStack(alignment: .leading, spacing: 7) {
                         Text("退场方式")
-                            .font(.appUI(.caption2, weight: .semibold))
+                            .font(.appUI(size: 10, weight: .semibold))
                             .foregroundStyle(EditorTheme.chrome(0.62))
                         EditorTileSelector(
                             options: stickerExitAnimationOptions,
@@ -356,11 +346,11 @@ extension EditorInspectorView {
                         )
                         .accessibilityLabel("贴图退场方式")
                         if clip.exitAnimation == nil {
-                            Label(
+                            EditorSymbolLabel(
                                 "自动采用入场方式的反向动作",
                                 systemImage: "arrow.triangle.2.circlepath"
                             )
-                            .font(.appUI(.caption2))
+                            .font(.appUI(size: 10))
                             .foregroundStyle(EditorTheme.chrome(0.50))
                         }
                         overlaySlider(
@@ -438,7 +428,7 @@ extension EditorInspectorView {
                 ) else { return }
                 timeline.mosaicClips[index][keyPath: keyPath] = value
             },
-            actionName: "调整打码",
+            actionName: "调整区域效果",
             onError: onError
         )
     }
@@ -463,7 +453,7 @@ extension EditorInspectorView {
                 timeline.mosaicClips[index].sourceRect = timeline.mosaicClips[index]
                     .sourceRect.clamped()
             },
-            actionName: "调整打码区域",
+            actionName: "调整效果区域",
             onError: onError
         )
     }
@@ -598,10 +588,10 @@ extension EditorInspectorView {
     ) -> some View {
         Button(action: action) {
             VStack(spacing: 4) {
-                Image(systemName: symbol)
+                EditorSymbol(symbol, size: 15.5)
                     .font(.appUI(size: 12, weight: .semibold))
                 Text(appLocalized(title))
-                    .font(.appUI(size: 9.5, weight: .medium))
+                    .font(.appUI(size: 10, weight: .medium))
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
             }
@@ -616,13 +606,6 @@ extension EditorInspectorView {
                 EditorTheme.chrome(disabled ? 0.018 : 0.055),
                 in: RoundedRectangle(cornerRadius: 8, style: .continuous)
             )
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(
-                        EditorTheme.chrome(disabled ? 0.025 : 0.075),
-                        lineWidth: 0.75
-                    )
-            }
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.editorThumbnail)

@@ -5,8 +5,6 @@ import QuartzCore
 /// colours misses native scroll views and dynamic NSColor-backed controls.
 @MainActor
 enum WindowAppearanceTransition {
-    private static let animationKey = "dogsc.appearance.crossfade"
-
     static func apply(_ appearance: NSAppearance?, to window: NSWindow) {
         let names: [NSAppearance.Name] = [.darkAqua, .aqua]
         let previous = window.effectiveAppearance.bestMatch(from: names)
@@ -17,26 +15,87 @@ enum WindowAppearanceTransition {
             && window.occlusionState.contains(.visible)
             && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
 
-        guard shouldAnimate, let content = window.contentView else {
+        guard shouldAnimate else {
             window.appearance = appearance
             return
         }
+        crossfade(window, duration: 0.34) {
+            window.appearance = appearance
+        }
+    }
 
-        content.wantsLayer = true
-        content.layoutSubtreeIfNeeded()
-        content.displayIfNeeded()
+    /// Dissolves the window from its current pixels into whatever the next
+    /// state change draws. A frozen snapshot covers the window while SwiftUI,
+    /// AppKit layers and asynchronous canvases all redraw underneath; only
+    /// once they have settled does the snapshot fade away, so nothing pops
+    /// in late or flashes through a half-updated layout.
+    static func crossfade(_ window: NSWindow?, duration: TimeInterval = 0.26, change: () -> Void) {
+        guard let window, let frameView = window.contentView,
+              window.isVisible, window.occlusionState.contains(.visible),
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              let snapshot = WindowSnapshotView(capturing: frameView) else {
+            change()
+            return
+        }
+        frameView.addSubview(snapshot, positioned: .above, relativeTo: nil)
+        change()
+        // Two short beats let SwiftUI commit and late-drawing layers catch up.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = duration
+                context.timingFunction = CAMediaTimingFunction(controlPoints: 0.4, 0, 0.2, 1)
+                snapshot.animator().alphaValue = 0
+            } completionHandler: {
+                MainActor.assumeIsolated { snapshot.removeFromSuperview() }
+            }
+        }
+    }
+}
 
-        CATransaction.begin()
-        let fade = CATransition()
-        fade.type = .fade
-        fade.duration = 0.32
-        fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        // Reusing the key replaces an in-flight fade on a rapid second click.
-        // No hit-testing overlay, screenshot permission or rendering timer.
-        content.layer?.add(fade, forKey: animationKey)
-        window.appearance = appearance
-        content.layoutSubtreeIfNeeded()
-        content.displayIfNeeded()
-        CATransaction.commit()
+/// A frozen picture of the window that never takes clicks. The window
+/// server already holds the composited pixels (including Metal canvases), so
+/// copying them is near-instant; redrawing the view tree into a bitmap on the
+/// main thread is the slow path and only a fallback.
+private final class WindowSnapshotView: NSImageView {
+    init?(capturing view: NSView) {
+        let bounds = view.bounds
+        guard bounds.width > 1, bounds.height > 1 else { return nil }
+        let image: NSImage
+        if let window = view.window, let cgImage = Self.windowServerImage(of: window) {
+            image = NSImage(cgImage: cgImage, size: bounds.size)
+        } else {
+            guard let rep = view.bitmapImageRepForCachingDisplay(in: bounds) else { return nil }
+            view.cacheDisplay(in: bounds, to: rep)
+            image = NSImage(size: bounds.size)
+            image.addRepresentation(rep)
+        }
+        super.init(frame: bounds)
+        self.image = image
+        imageScaling = .scaleAxesIndependently
+        autoresizingMask = [.width, .height]
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    private typealias WindowImageFunction = @convention(c) (
+        CGRect, UInt32, UInt32, UInt32
+    ) -> Unmanaged<CGImage>?
+
+    /// Looked up at run time: the call is still the fastest way to copy one
+    /// window's own pixels, and needs no capture session or async hop.
+    private static let windowImageFunction: WindowImageFunction? = {
+        guard let handle = dlopen(nil, RTLD_NOW),
+              let symbol = dlsym(handle, "CGWindowListCreateImage") else { return nil }
+        return unsafeBitCast(symbol, to: WindowImageFunction.self)
+    }()
+
+    private static func windowServerImage(of window: NSWindow) -> CGImage? {
+        guard let capture = windowImageFunction else { return nil }
+        // .null bounds = the window's own frame; option 1<<3 = including
+        // window; image option 1<<0 = ignore framing (no shadow).
+        return capture(.null, 1 << 3, UInt32(window.windowNumber), 1 << 0)?.takeRetainedValue()
     }
 }

@@ -80,53 +80,25 @@ struct EditorToolbarIconSurface: View {
             // Toolbar actions share the recorder's hand-drawn stroke family;
             // anything without a drawn counterpart keeps its system symbol.
             if let kind = Self.lineIcon(for: systemName) {
-                AppLineIcon(kind: kind, size: 17)
+                AppLineIcon(kind: kind, size: 16)
             } else {
-                Image(systemName: systemName).font(.appUI(size: 15, weight: .regular))
+                EditorSymbol(systemName, size: 18).font(.appUI(size: 14, weight: .regular))
             }
         }
-        .foregroundStyle(EditorTheme.chrome(0.78))
-        .frame(width: 32, height: 32)
+        .foregroundStyle(EditorTheme.secondaryText)
+        .frame(width: 30, height: 30)
         .background(isActive ? EditorTheme.selectionWash : .clear,
-                    in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    in: Circle())
+        .contentShape(Circle())
     }
 
     static func lineIcon(for systemName: String) -> AppLineIcon.Kind? {
-        switch systemName {
-        case "arrow.uturn.backward": .undo
-        case "arrow.uturn.forward": .redo
-        case "gearshape": .settings
-        case "plus": .plus
-        case "slider.horizontal.3": .sliders
-        case "moon.stars.fill", "moon.fill": .moon
-        case "sun.max.fill", "sun.max": .sun
-        case "trash": .trash
-        case "folder": .folder
-        case "square.3.layers.3d": .layers
-        case "rectangle.inset.filled", "square.on.square": .layout
-        case "macwindow": .window
-        case "photo": .scene
-        case "grid": .grid
-        case "waveform", "waveform.path.ecg.rectangle": .waveform
-        case "film", "film.stack", "film.stack.fill": .film
-        case "crop": .crop
-        case "scissors": .scissors
-        case "scope", "viewfinder": .zoom
-        case "sparkles.rectangle.stack": .opening
-        case "speaker.wave.2", "speaker.wave.2.fill": .speaker
-        case "mic", "mic.fill": .microphone
-        case "video", "video.fill": .camera
-        case "display": .display
-        case "pencil": .pencil
-        case "minus": .minus
-        default: nil
-        }
+        EditorSymbolCatalog.kind(for: systemName)
     }
 }
 
-/// The one solid action on the editor's top edge, like the recorder's
-/// primary pill: ink fill, inverted label, a short pressed settle.
+/// The one solid action on the editor's top edge: an ink capsule with an
+/// inverted label. Hover only lifts its tone; press settles it slightly.
 struct EditorPrimaryPillButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View { Pill(configuration: configuration) }
 
@@ -139,18 +111,21 @@ struct EditorPrimaryPillButtonStyle: ButtonStyle {
             configuration.label
                 .font(.appUI(size: 13, weight: .semibold))
                 .foregroundStyle(EditorTheme.onAccent)
-                .padding(.horizontal, 18)
-                .frame(height: 40)
-                .background(EditorTheme.platinumAccent.opacity(pressed ? 0.78 : hovered && isEnabled ? 0.9 : 1),
+                .padding(.horizontal, 14)
+                .frame(height: 30)
+                // The one primary action is the editor's black ink slab;
+                // hover lifts it slightly, press settles it.
+                .background(EditorTheme.platinumAccent.opacity(pressed ? 0.82 : 1),
                             in: Capsule(style: .continuous))
+                .overlay(Capsule(style: .continuous).fill(EditorTheme.onAccent.opacity(hovered && isEnabled && !pressed ? 0.12 : 0)))
+                .shadow(color: hovered && isEnabled ? EditorTheme.accentGlow : .clear, radius: 6, y: 2)
                 .contentShape(Capsule(style: .continuous))
-                .shadow(color: EditorTheme.softShadow.opacity(0.7), radius: 12, y: 5)
                 .appKeyboardFocus(in: Capsule(style: .continuous))
-                .scaleEffect(pressed && !RecorderMotion.reduces ? 0.96 : 1)
+                .scaleEffect(pressed && !RecorderMotion.reduces ? 0.97 : 1)
                 .opacity(isEnabled ? 1 : 0.4)
                 .onHover { hovered = $0 }
-                .animation(RecorderMotion.quick, value: pressed)
-                .animation(RecorderMotion.fade, value: hovered)
+                .animation(SpringMotion.snappy, value: pressed)
+                .animation(SpringMotion.hover, value: hovered)
         }
     }
 }
@@ -161,14 +136,26 @@ struct EditorToolbarControlSurface<Content: View>: View {
     @ViewBuilder let content: () -> Content
     var body: some View {
         content()
-            .font(.appUI(size: 13, weight: .medium))
-            .foregroundStyle(EditorTheme.chrome(0.82))
-            .padding(.horizontal, 12).frame(height: 32)
+            .font(.appUI(size: 12, weight: .medium))
+            .foregroundStyle(EditorTheme.secondaryText)
+            .padding(.horizontal, 10).frame(height: 30)
             .background(isActive ? EditorTheme.selectionWash : .clear,
-                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        in: Capsule(style: .continuous))
+            .contentShape(Capsule(style: .continuous))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(appLocalized(accessibilityTitle))
+    }
+}
+
+enum EditorChromeMetrics {
+    static let titleBarHeight: CGFloat = 46
+}
+
+/// A short vertical rule between toolbar groups.
+struct EditorToolbarDivider: View {
+    var body: some View {
+        Rectangle().fill(EditorTheme.hairline).frame(width: 1, height: 16).padding(.horizontal, 6)
+            .accessibilityHidden(true)
     }
 }
 
@@ -183,6 +170,8 @@ struct EditorView: View {
     @State private var showsExportSheet = false
     @State private var exportScope: EditorExportScope = .fullProject
     @State private var showsShortcutCheatsheet = false
+    /// A short "Undo: Adjust Zoom" chip, so ⌘Z is never a silent jump.
+    @State private var undoToast: EditorUndoToast?
     @State var showsScenePresetPopover = false
     @State var savedStylePresets: [EditorStylePreset] = []
     @State var isNamingStylePreset = false
@@ -206,6 +195,7 @@ struct EditorView: View {
     /// The camera inspector owns its disclosure while the timeline mirrors it.
     @State private var isCameraSyncEditing = false
     @State private var explicitInspectorTab: InspectorTab?
+    @State private var inspectorMovesDown = true
     @State private var timelineTrackVisibility: EditorTimelineTrackVisibility
     @AppStorage(AppPreferences.previewResolutionModeKey)
     private var previewResolutionMode = EditorPreviewResolutionMode.defaultValue
@@ -248,35 +238,44 @@ struct EditorView: View {
     var body: some View {
         GeometryReader { window in
             let layout = EditorWorkspaceLayout(size: window.size, screenSize: workspaceScreenSize)
+            // Docked studio layout: a slim title bar, the stage with its
+            // transport HUD, the inspector docked to the right edge, and the
+            // timeline spanning the full width below. Panels meet at hairlines.
             VStack(spacing: 0) {
                 editorToolbar(layout: layout)
+                Rectangle().fill(EditorTheme.hairline).frame(height: 1)
                 GeometryReader { geometry in
+                    let timelineHeight = layout.timelineHeight(
+                        preferred: preferredTimelineHeight,
+                        availableHeight: geometry.size.height
+                    )
                     VStack(spacing: 0) {
-                        GeometryReader { workspace in
-                            editorWorkspace(size: workspace.size, layout: layout)
+                        HStack(spacing: 0) {
+                            GeometryReader { stage in
+                                editorStage(size: stage.size, layout: layout)
+                            }
+                            .background(EditorTheme.stage)
+                            Rectangle().fill(EditorTheme.hairline).frame(width: 1)
+                            editorInspectorColumn(layout: layout)
                         }
-                        .background { EditorWorkspaceGrid() }
-
-                        Color.clear.frame(height: layout.timelineGap)
-                        timeline(panelHeight: layout.timelineHeight(
-                            preferred: preferredTimelineHeight,
-                            availableHeight: geometry.size.height
-                        ), layout: layout)
-                            .modifier(EditorFloatingSurface(cornerRadius: layout.surfaceRadius))
-                            .firstUseTourTarget("editor.timeline", in: .editor, highlight: .rounded(layout.surfaceRadius))
-                            .padding(.horizontal, layout.outerInset)
-                            .padding(.bottom, layout.outerInset)
+                        Rectangle().fill(EditorTheme.hairline).frame(height: 1)
+                        timeline(panelHeight: timelineHeight, layout: layout)
+                            .background(EditorTheme.panelSurface)
+                            .firstUseTourTarget("editor.timeline", in: .editor, highlight: .rounded(0))
                     }
                     .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
                 }
             }
         }
+        // The title bar starts at the window's top edge; the native traffic
+        // lights are re-centred on its midline by the lifecycle bridge.
+        .ignoresSafeArea(.container, edges: .top)
         .frame(minWidth: EditorWorkspaceLayout.minimumWindowSize.width,
                minHeight: EditorWorkspaceLayout.minimumWindowSize.height)
-        .background(appBackground)
+        .background(EditorTheme.backgroundDeep)
         // 界面交互使用铂金强调；橙/红/绿只表达内容身份与录制状态。
         .tint(editorAccent)
-        .font(.appUI(.body))
+        .font(.appUI(size: 13))
         .focusEffectDisabled()
         .firstUseTour(.editor, enabled: !showsExportSheet && !isCropping && !isNamingStylePreset && !showsShortcutCheatsheet)
         .environment(\.editorIsActive, isEditorActive)
@@ -313,12 +312,18 @@ struct EditorView: View {
                         hostActions.clearError()
                     }
                     .id(revision)
-                    .transition(.opacity)
+                    .transition(RecorderMotion.reduces ? .opacity : .asymmetric(
+                        insertion: .opacity
+                            .combined(with: .offset(y: -10))
+                            .combined(with: .scale(scale: 0.96, anchor: .topTrailing)),
+                        removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .topTrailing))
+                    ))
                 }
             }
-            .padding(.top, 58)
-            .padding(.trailing, 18)
-            .animation(.easeOut(duration: 0.18), value: hostActions.errorRevision)
+            .padding(.top, EditorChromeMetrics.titleBarHeight + 12)
+            .padding(.trailing, 12)
+            .animation(SpringMotion.fluid ?? .easeOut(duration: 0.18), value: hostActions.errorRevision)
+            .animation(SpringMotion.fluid ?? .easeOut(duration: 0.18), value: hostActions.errorMessage)
             .zIndex(20)
         }
         .sheet(isPresented: $showsExportSheet) {
@@ -468,6 +473,14 @@ struct EditorView: View {
             installTitleEditingMouseMonitor()
             EditorMenuBridge.shared.attachEditor(undoManager: undoManager)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .NSUndoManagerDidUndoChange)) { note in
+            guard let manager = note.object as? UndoManager, manager === undoManager else { return }
+            presentUndoToast(redo: false, actionName: manager.redoActionName)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSUndoManagerDidRedoChange)) { note in
+            guard let manager = note.object as? UndoManager, manager === undoManager else { return }
+            presentUndoToast(redo: true, actionName: manager.undoActionName)
+        }
         .onChange(of: undoManager) { _, manager in
             editorStore.attachUndoManager(manager)
             EditorMenuBridge.shared.attachEditor(undoManager: manager)
@@ -510,6 +523,8 @@ struct EditorView: View {
                 ?? EditorInspectorRouting.tab(for: editorStore.selection)
         }
         nonmutating set {
+            let order = InspectorTab.allCases
+            inspectorMovesDown = (order.firstIndex(of: newValue) ?? 0) >= (order.firstIndex(of: selectedInspector) ?? 0)
             explicitInspectorTab = newValue
             if newValue == .opening {
                 editorStore.selection = .canvas
@@ -591,12 +606,11 @@ struct EditorView: View {
         Binding(get: { selectedInspector }, set: { selectedInspector = $0 })
     }
 
-    private func editorWorkspace(size: CGSize, layout: EditorWorkspaceLayout) -> some View {
-        let minimumGap = layout.workspaceGap
-        let edge = layout.workspaceEdge
-        let innerWidth = max(size.width - edge * 2, 1)
-        let availableWidth = max(innerWidth - layout.railWidth - minimumGap * 2 - layout.inspectorWidth, 160)
-        let availableHeight = max(size.height - 32 - layout.canvasToolbarOffset, 80)
+    /// The stage: the canvas centred at its true aspect ratio, with the
+    /// floating HUD (canvas tools + transport) beneath it.
+    private func editorStage(size: CGSize, layout: EditorWorkspaceLayout) -> some View {
+        let inset = layout.value(regular: 32, compact: 16)
+        let hudReserve: CGFloat = layout.value(regular: 84, compact: 72)
         var workspaceCanvas = editorStore.previewProject.canvas
         if isCropping {
             workspaceCanvas.aspectRatio = .adaptive
@@ -606,61 +620,96 @@ struct EditorView: View {
             canvas: workspaceCanvas,
             sourceSize: mediaSession.sourceDisplaySize
         )
+        let availableWidth = max(size.width - inset * 2, 160)
+        let availableHeight = max(size.height - inset - hudReserve, 120)
         let canvasWidth = min(availableWidth, availableHeight * ratio)
         let canvasHeight = canvasWidth / ratio
-        // The user prefers the two floating tool surfaces anchored to the workspace edges.
-        let columnWidth = availableWidth
-        let previewHeight = max(canvasHeight, min(availableHeight, 192))
-        let panelHeight = layout.value(regular: previewHeight, compact: availableHeight)
-        let gap = max((innerWidth - layout.railWidth - layout.inspectorWidth - columnWidth) / 2, minimumGap)
-        return HStack(alignment: .top, spacing: gap) {
-            EditorWorkspaceToolRail(
-                selection: Binding(get: { selectedInspector }, set: { selectedInspector = $0 }),
-                isCropping: isCropping,
-                cameraAvailable: mediaSession.inventories.camera.hasVideo,
-                audioAvailable: sourceHasAudio || microphoneHasAudio,
-                cursorAvailable: !context.media.pointerEvents.isEmpty
-            )
-            .editorChromeScale(layout.chromeScale)
-            .firstUseTourTarget("editor.tools", in: .editor, highlight: .rounded(layout.surfaceRadius))
-            .frame(height: panelHeight)
-            .padding(.top, layout.canvasToolbarOffset)
-            VStack(spacing: 8 * layout.chromeScale) {
-                canvasToolbar.editorChromeScale(layout.chromeScale)
-                    .zIndex(1)
-                previewArea.frame(width: columnWidth, height: previewHeight).clipped()
+        return ZStack {
+            // A quiet dot field marks the workspace as "not the picture", so
+            // a white or flat-colour canvas never melts into its surroundings.
+            EditorStageDots()
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    guard !isCropping else { return }
+                    selectedPrimarySegmentIDs.removeAll()
+                    editorStore.selection = nil
+                }
+            VStack(spacing: 0) {
+                Spacer(minLength: inset)
+                previewArea
+                    .frame(width: canvasWidth, height: canvasHeight)
+                    .clipped()
+                    .overlay { EditorConsoleHUDOverlay(color: inspectorPalette.fill) }
+                    .overlay(alignment: .top) {
+                        if let undoToast {
+                            EditorUndoToastView(toast: undoToast)
+                                .id(undoToast.id)
+                                .padding(.top, 14)
+                                .transition(.asymmetric(
+                                    insertion: .move(edge: .top).combined(with: .opacity),
+                                    removal: .opacity
+                                ))
+                        }
+                    }
+                    .animation(.spring(response: 0.36, dampingFraction: 0.82), value: undoToast?.id)
                     // Clipping trims pixels, not the hit regions of enlarged
                     // screen/camera overlays. Fence them inside the monitor.
                     .contentShape(Rectangle())
-                    .frame(maxHeight: .infinity)
+                    .shadow(color: EditorTheme.softShadow, radius: 22, y: 10)
+                Spacer(minLength: 16)
+                stageHUD(layout: layout)
+                    .zIndex(1)
+                Spacer(minLength: 16)
             }
-            .frame(width: columnWidth, height: panelHeight + 48 * layout.chromeScale)
-            editorInspector(
-                contentWidth: layout.inspectorLogicalWidth,
-                contentHeight: panelHeight / layout.chromeScale
-            )
-                .editorChromeScale(layout.chromeScale)
-                .frame(width: layout.inspectorWidth, height: panelHeight)
-                .modifier(EditorFloatingSurface(cornerRadius: layout.surfaceRadius))
-                .firstUseTourTarget("editor.inspector", in: .editor, highlight: .rounded(layout.surfaceRadius))
-                .padding(.top, layout.canvasToolbarOffset)
+            .frame(width: size.width, height: size.height)
         }
-        .padding(.horizontal, edge)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(SpringMotion.fluid, value: ratio)
         .animation(nil, value: isCropping)
-        .background {
-            Color.clear.contentShape(Rectangle()).onTapGesture {
-                guard !isCropping else { return }
-                selectedPrimarySegmentIDs.removeAll()
-                editorStore.selection = nil
-            }
+    }
+
+    /// The colour identity of the current inspector tab (first 3 tabs use
+    /// primary lime green, last 3 tabs use secondary coral orange).
+    private var inspectorPalette: EditorConsolePalette {
+        EditorConsole.palette(for: selectedInspector)
+    }
+
+    private func presentUndoToast(redo: Bool, actionName: String) {
+        let id = (undoToast?.id ?? 0) + 1
+        undoToast = EditorUndoToast(id: id, isRedo: redo, actionName: actionName)
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(1400))
+            if undoToast?.id == id { undoToast = nil }
         }
     }
 
+    private func editorInspectorColumn(layout: EditorWorkspaceLayout) -> some View {
+        GeometryReader { column in
+            VStack(spacing: 0) {
+                EditorInspectorTabBar(
+                    selection: Binding(get: { selectedInspector }, set: { selectedInspector = $0 }),
+                    isCropping: isCropping,
+                    cameraAvailable: mediaSession.inventories.camera.hasVideo,
+                    audioAvailable: sourceHasAudio || microphoneHasAudio,
+                    cursorAvailable: !context.media.pointerEvents.isEmpty
+                )
+                .firstUseTourTarget("editor.tools", in: .editor, highlight: .rounded(22))
+                editorInspector(
+                    contentWidth: EditorInspectorSizing.minimumContentWidth,
+                    contentHeight: max(column.size.height - EditorInspectorTabBar.height - 1, 0)
+                )
+                .frame(maxHeight: .infinity, alignment: .top)
+                .firstUseTourTarget("editor.inspector", in: .editor, highlight: .rounded(0))
+            }
+        }
+        .frame(width: EditorInspectorSizing.minimumContentWidth)
+        .environment(\.consolePalette, inspectorPalette)
+        .background(EditorTheme.panelSurface)
+        .clipped()
+    }
+
     private func toolbarCapsule<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        HStack(spacing: 4) { content() }
-            .padding(.horizontal, 4).frame(height: 40)
+        HStack(spacing: 2) { content() }
     }
 
     private var projectMenu: some View {
@@ -672,71 +721,64 @@ struct EditorView: View {
             .action("替换当前项目摄像头…", isEnabled: editorStore.project.media?.camera != nil) { hostActions.importCameraReplacement() }
         ]) {
             HStack(spacing: 3) {
-                AppLineIcon(kind: .folder, size: 17)
-                AppLineIcon(kind: .chevronDown, size: 10)
-            }.foregroundStyle(EditorTheme.chrome(0.62)).frame(width: 48, height: 36)
+                AppLineIcon(kind: .folder, size: 15)
+                AppLineIcon(kind: .chevronDown, size: 9)
+            }.foregroundStyle(EditorTheme.secondaryText).frame(width: 44, height: 30)
         }
         .disabled(isCropping)
         .accessibilityIdentifier("editor.project.menu")
     }
 
+    /// The title bar: project identity and history on the left, scene and
+    /// app actions on the right, and the one solid action — Export — last.
+    /// It leaves room for the native traffic lights and stays one flat band.
     private func editorToolbar(layout: EditorWorkspaceLayout) -> some View {
         ZStack {
             EditorWindowChromeInteraction().accessibilityHidden(true)
-            HStack(spacing: layout.value(regular: 12, compact: 8)) {
-                HStack(spacing: 2) {
+            HStack(spacing: 4) {
+                HStack(spacing: 0) {
                     projectMenu
                     titleEditor
-                    Button { hostActions.deleteProject() } label: {
-                        AppLineIcon(kind: .trash, size: 15)
-                            .foregroundStyle(EditorTheme.chrome(0.5)).frame(width: 34, height: 34)
-                    }
-                    .buttonStyle(EditorToolbarPressButtonStyle(cornerRadius: 17))
-                    .disabled(isCropping || isEditingTitle)
-                    .help("删除当前项目…")
-                    .accessibilityLabel("删除当前项目")
-                    .accessibilityIdentifier("editor.project.delete")
                 }
-                .frame(maxWidth: layout.value(regular: 360, compact: 220), alignment: .leading)
-                .padding(.horizontal, 4)
-                .frame(height: 44)
-                .editorCapsuleIsland()
+                .frame(maxWidth: layout.value(regular: 420, compact: 260), alignment: .leading)
+                .fixedSize(horizontal: true, vertical: false)
                 persistenceIndicator
-                Spacer(minLength: 20)
-                // One island for history, scenes and app chrome; the recorder
-                // separates groups with spacing, not dividers.
-                HStack(spacing: 2) {
-                    Button { undoManager?.undo() } label: {
-                        EditorToolbarIconSurface(systemName: "arrow.uturn.backward")
-                    }
-                    .buttonStyle(EditorToolbarPressButtonStyle(cornerRadius: 16))
-                    .disabled(isCropping || undoManager?.canUndo != true)
-                    .help("撤销（⌘Z）").accessibilityLabel("撤销")
-                    Button { undoManager?.redo() } label: {
-                        EditorToolbarIconSurface(systemName: "arrow.uturn.forward")
-                    }
-                    .buttonStyle(EditorToolbarPressButtonStyle(cornerRadius: 16))
-                    .disabled(isCropping || undoManager?.canRedo != true)
-                    .help("重做（⌘⇧Z）").accessibilityLabel("重做")
-                    Color.clear.frame(width: 6, height: 1)
-                    stylePresetControl(compact: layout.isCompact)
-                        .disabled(isCropping || isSavingStylePreset)
-                        .help("保存或复用完整场景配置")
-                    Color.clear.frame(width: 6, height: 1)
-                    Button { AppSettingsWindowController.shared.show() } label: {
-                        EditorToolbarIconSurface(systemName: "gearshape")
-                    }
-                    .buttonStyle(EditorToolbarPressButtonStyle(cornerRadius: 16))
-                    .help("设置（⌘,）").accessibilityLabel("设置")
-                    .accessibilityIdentifier("editor.app-settings")
-                    EditorAppearanceToggleButton()
+                EditorToolbarDivider()
+                Button { undoManager?.undo() } label: {
+                    EditorToolbarIconSurface(systemName: "arrow.uturn.backward")
                 }
-                .padding(.horizontal, 6)
-                .frame(height: 44)
-                .editorCapsuleIsland()
+                .buttonStyle(EditorToolbarPressButtonStyle())
+                .disabled(isCropping || undoManager?.canUndo != true)
+                .help("撤销（⌘Z）").accessibilityLabel("撤销")
+                Button { undoManager?.redo() } label: {
+                    EditorToolbarIconSurface(systemName: "arrow.uturn.forward")
+                }
+                .buttonStyle(EditorToolbarPressButtonStyle())
+                .disabled(isCropping || undoManager?.canRedo != true)
+                .help("重做（⌘⇧Z）").accessibilityLabel("重做")
+                Spacer(minLength: 16)
+                stylePresetControl(compact: layout.isCompact)
+                    .disabled(isCropping || isSavingStylePreset)
+                    .help("保存或复用完整场景配置")
+                EditorAppearanceToggleButton()
+                Button { AppSettingsWindowController.shared.show() } label: {
+                    EditorToolbarIconSurface(systemName: "gearshape")
+                }
+                .buttonStyle(EditorToolbarPressButtonStyle())
+                .help("设置（⌘,）").accessibilityLabel("设置")
+                .accessibilityIdentifier("editor.app-settings")
+                Button { hostActions.deleteProject() } label: {
+                    EditorToolbarIconSurface(systemName: "trash")
+                }
+                .buttonStyle(EditorToolbarPressButtonStyle())
+                .disabled(isCropping || isEditingTitle)
+                .help("删除当前项目…")
+                .accessibilityLabel("删除当前项目")
+                .accessibilityIdentifier("editor.project.delete")
+                EditorToolbarDivider()
                 Button { presentExport(scope: .fullProject) } label: {
-                    HStack(spacing: 7) {
-                        AppLineIcon(kind: .share, size: 15)
+                    HStack(spacing: 6) {
+                        AppLineIcon(kind: .share, size: 14)
                         Text("导出")
                     }
                 }
@@ -744,15 +786,19 @@ struct EditorView: View {
                 .disabled(isCropping)
                 .help(appLocalized(isCropping ? "请先完成或取消裁切" : "导出成片（⌘E）"))
                 .accessibilityLabel("导出")
-                .firstUseTourTarget("editor.export", in: .editor, highlight: .rounded(20))
+                .firstUseTourTarget("editor.export", in: .editor, highlight: .rounded(16))
             }
-            .padding(.horizontal, 20)
+            .padding(.leading, 78)
+            .padding(.trailing, 12)
         }
-        .frame(height: layout.toolbarHeight)
+        .frame(height: EditorChromeMetrics.titleBarHeight)
+        .background(EditorTheme.chromeBar)
     }
 
-    private var canvasToolbar: some View {
-        HStack(spacing: 4) {
+    /// Canvas tools and transport share one floating capsule under the
+    /// picture, so everything about "what is on screen now" sits together.
+    private func stageHUD(layout: EditorWorkspaceLayout) -> some View {
+        HStack(spacing: 2) {
             previewControls
             if !isCropping {
                 EditorActionMenu(title: "添加到画面", items: [
@@ -767,33 +813,103 @@ struct EditorView: View {
                     .action(EditorPreviewResolutionMode.low.label, detail: EditorPreviewResolutionMode.low.detail,
                             isOn: previewResolutionMode == .low) { previewResolutionMode = .low }
                 ]) { EditorToolbarIconSurface(systemName: "slider.horizontal.3") }
+                EditorToolbarDivider()
+                transportControls
             }
         }
-        .padding(.horizontal, 6).padding(.vertical, 4)
-        .fixedSize(horizontal: true, vertical: false)
-        .editorCapsuleIsland()
+        .padding(4)
+        .frame(height: 44)
+        .fixedSize()
+        .background {
+            Capsule(style: .continuous)
+                .fill(.regularMaterial)
+                .overlay { Capsule(style: .continuous).fill(EditorTheme.panelSurface.opacity(0.55)) }
+                .overlay { Capsule(style: .continuous).strokeBorder(EditorTheme.islandOutline, lineWidth: 0.5) }
+                .shadow(color: EditorTheme.contactShadow, radius: 1, y: 0.5)
+                .shadow(color: EditorTheme.softShadow, radius: 16, y: 6)
+        }
+        .animation(SpringMotion.settle, value: isCropping)
+    }
+
+    private var transportFrameDuration: TimeInterval {
+        1 / Double(max(editorStore.project.capture.captureFrameRate.rawValue, 1))
+    }
+
+    private func stepTransport(byFrames frames: Int) {
+        let duration = max(mediaSession.outputDuration, 0)
+        let target = min(max(playbackController.outputTime + Double(frames) * transportFrameDuration, 0), duration)
+        playbackController.seek(to: target, pausing: true)
+    }
+
+    private var transportControls: some View {
+        HStack(spacing: 2) {
+            Button { stepTransport(byFrames: -1) } label: {
+                AppLineIcon(kind: .previousFrame, size: 15).frame(width: 32, height: 32)
+            }
+            .buttonStyle(EditorToolbarPressButtonStyle())
+            .foregroundStyle(EditorTheme.secondaryText)
+            .help("上一帧（←；Shift+← 移动 5 帧）")
+            .accessibilityLabel("上一帧")
+            Button { playbackController.togglePlayback() } label: {
+                ZStack {
+                    AppLineIcon(kind: .play, size: 15)
+                        .opacity(playbackController.isPlaying ? 0 : 1)
+                        .scaleEffect(playbackController.isPlaying ? 0.6 : 1)
+                    AppLineIcon(kind: .pause, size: 15)
+                        .opacity(playbackController.isPlaying ? 1 : 0)
+                        .scaleEffect(playbackController.isPlaying ? 1 : 0.6)
+                }
+                .animation(SpringMotion.snappy, value: playbackController.isPlaying)
+                .foregroundStyle(EditorTheme.onAccent)
+                .frame(width: 36, height: 36)
+                .background(EditorTheme.platinumAccent, in: Circle())
+                .shadow(color: playbackController.isPlaying ? EditorTheme.accentGlow : .clear, radius: 6)
+                .animation(.easeOut(duration: 0.2), value: playbackController.isPlaying)
+            }
+            .buttonStyle(EditorToolbarPressButtonStyle(showsHover: false))
+            .disabled(!playbackController.canPlay)
+            .help(appLocalized(playbackController.isPlaying ? "暂停（空格）" : "播放（空格）"))
+            .accessibilityLabel(appLocalized(playbackController.isPlaying ? "暂停" : "播放"))
+            Button { stepTransport(byFrames: 1) } label: {
+                AppLineIcon(kind: .nextFrame, size: 15).frame(width: 32, height: 32)
+            }
+            .buttonStyle(EditorToolbarPressButtonStyle())
+            .foregroundStyle(EditorTheme.secondaryText)
+            .help("下一帧（→；Shift+→ 移动 5 帧）")
+            .accessibilityLabel("下一帧")
+            HStack(spacing: 5) {
+                NativePlaybackTimeView(playbackController: playbackController)
+                    .frame(width: 66, height: 20)
+                Text("/ " + Self.transportTimestamp(mediaSession.outputDuration))
+                    .font(.system(size: 13.5, weight: .regular).monospacedDigit())
+                    .foregroundStyle(EditorTheme.tertiaryText)
+            }
+            .padding(.leading, 4)
+            .padding(.trailing, 10)
+        }
+    }
+
+    static func transportTimestamp(_ time: TimeInterval) -> String {
+        let centiseconds = max(Int((max(time, 0) * 100).rounded(.down)), 0)
+        return String(format: "%02d:%02d.%02d", centiseconds / 6_000, (centiseconds / 100) % 60, centiseconds % 100)
     }
 
     @ViewBuilder
     private var persistenceIndicator: some View {
-        switch hostActions.persistenceStatus {
-        case .clean:
-            // 自动保存成功是默认状态，不长期占用顶部栏。只有正在保存
-            // 或保存失败时才出现反馈，避免一个没有操作价值的常驻图标。
-            EmptyView()
-        case .saving:
-            ProgressView()
-                .controlSize(.small)
-                .help("正在保存项目")
-        case let .failed(message):
+        let state = EditorPersistenceBadgeState(
+            status: hostActions.persistenceStatus, hasDraft: editorStore.interaction != nil
+        )
+        if case let .failed(message) = hostActions.persistenceStatus {
             Button {
                 hostActions.reportError(String(format: appLocalized("自动保存失败：%@"), message))
             } label: {
-                Label("保存失败", systemImage: "exclamationmark.triangle.fill")
+                EditorPersistenceBadge(state: state)
             }
-            .buttonStyle(.editorWarning)
+            .buttonStyle(.editorToolbarPress)
             .help("自动保存失败：\(message)；点击查看")
             .accessibilityLabel("查看自动保存失败原因")
+        } else {
+            EditorPersistenceBadge(state: state)
         }
     }
 
@@ -801,9 +917,9 @@ struct EditorView: View {
     private var titleEditor: some View {
         if isEditingTitle {
             TextField(appLocalized("项目名称"), text: $titleDraft)
-                .textFieldStyle(.plain).font(.appUI(size: 15, weight: .medium))
+                .textFieldStyle(.plain).font(.appUI(size: 13, weight: .medium))
                 .tint(nil)
-                .padding(.horizontal, 12).frame(height: 34)
+                .padding(.horizontal, 10).frame(height: 28)
                 .background(EditorTheme.controlWell, in: Capsule(style: .continuous))
                 .background(EditorTextInputRegionAnchor(region: titleInputRegion))
                 .overlay {
@@ -827,16 +943,16 @@ struct EditorView: View {
             } label: {
                 HStack(spacing: 10) {
                     Text(projectDisplayTitle)
-                        .font(.appUI(size: 15, weight: .medium))
-                        .foregroundStyle(EditorTheme.chrome(0.88))
+                        .font(.appUI(size: 13, weight: .medium))
+                        .foregroundStyle(EditorTheme.primaryText)
                         .lineLimit(1).truncationMode(.middle)
-                    AppLineIcon(kind: .pencil, size: 12)
-                        .foregroundStyle(EditorTheme.chrome(0.36))
+                    AppLineIcon(kind: .pencil, size: 11)
+                        .foregroundStyle(EditorTheme.tertiaryText)
                 }
-                .padding(.horizontal, 12).frame(height: 34)
+                .padding(.horizontal, 10).frame(height: 28)
                 .contentShape(Capsule(style: .continuous))
             }
-            .buttonStyle(EditorToolbarPressButtonStyle(cornerRadius: 17))
+            .buttonStyle(EditorToolbarPressButtonStyle())
             .accessibilityLabel("重命名项目").accessibilityValue(projectDisplayTitle)
             .help("点击重命名项目")
         }
@@ -963,22 +1079,24 @@ struct EditorView: View {
         toolbarCapsule {
             HStack(spacing: 2) {
                 if cropPresentation.toolbarMode == .cropControls {
-                    HStack(spacing: 5) {
-                        Image(systemName: "crop")
-                            .font(.appUI(size: 11, weight: .bold))
-                            .foregroundStyle(Color.orange)
+                    HStack(spacing: 6) {
+                        AppLineIcon(kind: .crop, size: 13)
                         Text("裁切模式")
-                            .font(.appUI(.caption, weight: .semibold))
-                            .foregroundStyle(Color.orange)
+                            .font(.appUI(size: 11, weight: .semibold))
                     }
-                    .padding(.horizontal, 8)
+                    .foregroundStyle(EditorTheme.primaryText)
+                    .padding(.horizontal, 10)
+                    .frame(height: 30)
+                    .background(EditorTheme.selectionWash, in: Capsule(style: .continuous))
+                    .padding(.trailing, 4)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
 
                     Button("清除裁切") { resetCrop() }
                         .buttonStyle(.editorGhost)
                     Button("取消") { discardCrop() }
                         .buttonStyle(.editorGhost)
                     Button("完成") { confirmCrop() }
-                        .buttonStyle(.editorPrimary(minHeight: 24))
+                        .buttonStyle(.editorPrimary(minHeight: 30))
                 } else {
                     EditorCanvasRatioSelector(canvas: Binding(
                         get: { editorStore.project.canvas },
@@ -992,7 +1110,7 @@ struct EditorView: View {
 
                     Button { beginCrop() } label: {
                         EditorToolbarControlSurface(accessibilityTitle: "裁切") {
-                            Label("裁切", systemImage: "crop")
+                            EditorSymbolLabel("裁切", systemImage: "crop")
                         }
                     }
                     .buttonStyle(.editorToolbarPress)
@@ -1112,7 +1230,7 @@ struct EditorView: View {
                         .controlSize(.small)
                         .tint(tint)
                 } else if let systemImage {
-                    Image(systemName: systemImage)
+                    EditorSymbol(systemImage, size: 17)
                         .font(.appUI(size: 13, weight: .semibold))
                         .foregroundStyle(tint)
                 }
@@ -1125,7 +1243,7 @@ struct EditorView: View {
                     .font(.appUI(size: 14, weight: .medium))
                     .foregroundStyle(Color.primary.opacity(0.94))
                 Text(appLocalized(detail))
-                    .font(.appUI(.caption2))
+                    .font(.appUI(size: 10))
                     .foregroundStyle(Color.secondary.opacity(0.92))
                     .lineLimit(isBlocking ? 3 : 2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1388,8 +1506,40 @@ struct EditorView: View {
             cropDraft: cropDraftBinding,
             contentWidth: contentWidth,
             contentHeight: contentHeight,
+            tabMovesDown: inspectorMovesDown,
             onChooseWallpaper: hostActions.chooseWallpaper,
             onError: hostActions.reportError
         )
+    }
+}
+
+struct EditorUndoToast: Equatable {
+    let id: Int
+    let isRedo: Bool
+    let actionName: String
+}
+
+/// The chip shown at the top of the canvas after ⌘Z / ⇧⌘Z.
+struct EditorUndoToastView: View {
+    let toast: EditorUndoToast
+
+    var body: some View {
+        HStack(spacing: 7) {
+            AppLineIcon(kind: toast.isRedo ? .redo : .undo, size: 13)
+            Text(appLocalized(toast.isRedo ? "重做" : "撤销"))
+                .font(.appUI(size: 12, weight: .semibold))
+            if !toast.actionName.isEmpty {
+                Text(appLocalized(toast.actionName))
+                    .font(.appUI(size: 12))
+                    .opacity(0.72)
+                    .lineLimit(1)
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
+        .frame(height: 30)
+        .background(.black.opacity(0.62), in: Capsule(style: .continuous))
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .combine)
     }
 }

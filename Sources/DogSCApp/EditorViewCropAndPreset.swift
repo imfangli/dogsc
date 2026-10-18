@@ -26,30 +26,40 @@ extension EditorView {
         }
     }
 
+    var editorWindow: NSWindow? {
+        NSApp.windows.first { $0.identifier?.rawValue == "cn.laogou.dogsc.editor-window" }
+    }
+
     func beginCrop() {
         guard cropPresentation.permits(.beginCrop) else { return }
         playbackController.endHoverPreview()
         playbackController.pause()
         // 裁切期间检查器由裁切面板接管，完成/取消后选择回到屏幕初始状态，
         // 都落在合并后的"画面"页，无需在此预设页签。
-        editorStore.beginInteraction(tool: .crop, selection: .crop)
+        WindowAppearanceTransition.crossfade(editorWindow) {
+            editorStore.beginInteraction(tool: .crop, selection: .crop)
+        }
     }
 
     func confirmCrop() {
         guard cropPresentation.permits(.confirmCrop) else { return }
-        do {
-            _ = try editorStore.commitInteraction(actionName: "裁切屏幕")
-        } catch {
-            editorStore.cancelInteraction()
-            hostActions.reportError(error.localizedDescription)
+        WindowAppearanceTransition.crossfade(editorWindow) {
+            do {
+                _ = try editorStore.commitInteraction(actionName: "裁切屏幕")
+            } catch {
+                editorStore.cancelInteraction()
+                hostActions.reportError(error.localizedDescription)
+            }
+            editorStore.selection = .screen
         }
-        editorStore.selection = .screen
     }
 
     func discardCrop() {
         guard cropPresentation.permits(.cancelCrop) else { return }
-        editorStore.cancelInteraction()
-        editorStore.selection = .screen
+        WindowAppearanceTransition.crossfade(editorWindow) {
+            editorStore.cancelInteraction()
+            editorStore.selection = .screen
+        }
     }
 
     func resetCrop() {

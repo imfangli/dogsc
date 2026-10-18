@@ -8,7 +8,8 @@ import SwiftUI
 @MainActor
 final class AppSettingsWindowController {
     private static let contentWidth: CGFloat = 560
-    private static let initialContentHeight: CGFloat = 600
+    private static let maximumContentHeight: CGFloat = 640
+    private static let initialContentHeight: CGFloat = 540
 
     static let windowIdentifier = NSUserInterfaceItemIdentifier(
         "cn.laogou.dogsc.settings-window"
@@ -23,6 +24,8 @@ final class AppSettingsWindowController {
     private var clearsInitialFocus = false
     private var presentationRequest = 0
     private var pendingPresentation: Int?
+    private var lastPreferredHeight: CGFloat?
+    private var heightAnimation: WindowHeightSpring?
 
     private init() {
         closeObserver = NotificationCenter.default.addObserver(
@@ -65,13 +68,17 @@ final class AppSettingsWindowController {
         let controller = controller ?? makeController()
         let isOpening = controller.window?.isVisible != true
         if let window = controller.window, !window.isVisible, let screen {
-            let height = min(Self.initialContentHeight, max(screen.visibleFrame.height - 100, 420))
-            (window.contentViewController as? NSHostingController<AppSettingsView>)?.rootView = AppSettingsView(contentHeight: height, navigation: navigation)
+            heightAnimation?.stop()
+            let limit = min(Self.maximumContentHeight, max(screen.visibleFrame.height - 100, 420))
+            let height = min(lastPreferredHeight ?? Self.initialContentHeight, limit)
+            (window.contentViewController as? NSHostingController<AppSettingsView>)?.rootView = makeRootView(maximumHeight: limit)
             window.setContentSize(NSSize(width: Self.contentWidth, height: height))
             window.contentView?.layoutSubtreeIfNeeded()
             let bounds = screen.visibleFrame
+            // Centre a typical page; later pages grow and shrink from the top edge.
+            let typical = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: Self.contentWidth, height: 540)).height
             window.setFrameOrigin(NSPoint(x: bounds.midX - window.frame.width / 2,
-                                          y: bounds.midY - window.frame.height / 2))
+                                          y: bounds.midY + typical / 2 - window.frame.height))
         }
         self.controller = controller
         presentationRequest += 1
@@ -104,11 +111,12 @@ final class AppSettingsWindowController {
             backing: .buffered,
             defer: false
         )
-        let hostingController = NSHostingController(
-            rootView: AppSettingsView(navigation: navigation)
-        )
+        let hostingController = NSHostingController(rootView: makeRootView(maximumHeight: Self.maximumContentHeight))
+        // The window height follows the page island, driven below; the
+        // hosting controller must not impose its own size limits.
+        hostingController.sizingOptions = []
         window.identifier = Self.windowIdentifier
-        window.title = "\(applicationName) \(appLocalized("设置"))"
+        appLocalizeWindowTitle(window, "设置", prefix: applicationName)
         window.contentViewController = hostingController
         window.appearance = nil
         window.backgroundColor = RecorderStyle.canvasNSColor
@@ -125,11 +133,105 @@ final class AppSettingsWindowController {
         // itself above the desktop or other apps when the user switches away.
         window.level = .normal
         window.hidesOnDeactivate = true
-        window.contentMinSize = NSSize(width: Self.contentWidth, height: 420)
-        window.contentMaxSize = NSSize(width: Self.contentWidth, height: Self.initialContentHeight)
+        window.contentMinSize = NSSize(width: Self.contentWidth, height: 240)
+        window.contentMaxSize = NSSize(width: Self.contentWidth, height: Self.maximumContentHeight)
         window.standardWindowButton(.zoomButton)?.isEnabled = false
         window.center()
         return NSWindowController(window: window)
     }
 
+    private func makeRootView(maximumHeight: CGFloat) -> AppSettingsView {
+        AppSettingsView(contentHeight: maximumHeight, navigation: navigation) { [weak self] height in
+            self?.followContentHeight(height)
+        }
+    }
+
+    /// Keeps the window exactly as tall as the page needs. Visible changes
+    /// travel on the island's morph spring with the top edge held in place.
+    private func followContentHeight(_ height: CGFloat) {
+        guard let window = controller?.window else { return }
+        let target = min(max(height, 240), Self.maximumContentHeight).rounded()
+        lastPreferredHeight = target
+        guard window.isVisible, !RecorderMotion.reduces else {
+            heightAnimation?.stop()
+            WindowHeightSpring.apply(target, to: window, width: Self.contentWidth)
+            return
+        }
+        if let heightAnimation, heightAnimation.isRunning {
+            heightAnimation.retarget(target)
+        } else {
+            let current = window.contentRect(forFrameRect: window.frame).height
+            guard abs(current - target) > 0.5 else { return }
+            let spring = WindowHeightSpring(window: window, width: Self.contentWidth, from: current, to: target)
+            heightAnimation = spring
+            spring.start()
+        }
+    }
+}
+
+/// Samples RecorderMotion's morph spring on a frame timer and applies it to
+/// the window's content height, anchored to the top edge. A new target
+/// continues from the current height and velocity, so interruptions stay smooth.
+@MainActor
+private final class WindowHeightSpring {
+    private weak var window: NSWindow?
+    private let width: CGFloat
+    private let spring = RecorderMotion.morphSpring
+    private var from: CGFloat
+    private var to: CGFloat
+    private var initialVelocity: CGFloat = 0
+    private var startTime: CFTimeInterval = 0
+    private var timer: Timer?
+    var isRunning: Bool { timer != nil }
+
+    init(window: NSWindow, width: CGFloat, from: CGFloat, to: CGFloat) {
+        self.window = window
+        self.width = width
+        self.from = from
+        self.to = to
+    }
+
+    func start() {
+        startTime = CACurrentMediaTime()
+        let timer = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    func retarget(_ target: CGFloat) {
+        guard abs(target - to) > 0.5 else { return }
+        let elapsed = CACurrentMediaTime() - startTime
+        let current = from + spring.value(target: to - from, initialVelocity: initialVelocity, time: elapsed)
+        initialVelocity = spring.velocity(target: to - from, initialVelocity: initialVelocity, time: elapsed)
+        from = current
+        to = target
+        startTime = CACurrentMediaTime()
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    private func tick() {
+        guard let window else { stop(); return }
+        let elapsed = CACurrentMediaTime() - startTime
+        if elapsed >= spring.settlingDuration {
+            Self.apply(to, to: window, width: width)
+            stop()
+            return
+        }
+        let height = from + spring.value(target: to - from, initialVelocity: initialVelocity, time: elapsed)
+        Self.apply(height, to: window, width: width)
+    }
+
+    static func apply(_ height: CGFloat, to window: NSWindow, width: CGFloat) {
+        let top = window.frame.maxY
+        var frame = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: width, height: height))
+        frame.origin.x = window.frame.minX
+        frame.origin.y = top - frame.height
+        window.setFrame(frame, display: true)
+    }
 }

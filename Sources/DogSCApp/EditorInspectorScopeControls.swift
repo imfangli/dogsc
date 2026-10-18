@@ -5,7 +5,6 @@ extension EditorInspectorView {
     var backgroundBlurSection: some View {
         VStack(spacing: 8) {
             if editorStore.previewProject.canvas.backgroundSource.usesWallpaperMedia {
-                Divider().overlay(EditorTheme.hairline)
                 sliderRow("背景模糊", value: canvasBinding(\.backgroundBlur, actionName: "调整背景模糊"),
                           range: 0...80, format: .points, compact: usesCompactBackgroundLayout)
             }
@@ -21,22 +20,19 @@ extension EditorInspectorView {
                 || abs(resolved.exitDuration - animation.requestedExitDuration()) > 0.001
                 || abs(resolved.endTime - animation.endTime) > 0.001
             if constrained {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("已按可用时间适配", systemImage: "clock.badge.checkmark")
-                        .font(.appUI(.caption, weight: .medium))
-                    Text("实际进入 \(EditorSliderValueFormat.seconds.text(for: resolved.enterDuration)) · 退出 \(EditorSliderValueFormat.seconds.text(for: resolved.exitDuration))")
-                        .font(.caption.monospacedDigit())
-                    Text("保留上方设定；片尾前完成退出，相邻动画紧接时连续衔接。")
-                        .font(.appUI(.caption2))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .foregroundStyle(.secondary)
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(EditorTheme.chrome(0.04), in: RoundedRectangle(cornerRadius: 8))
+                EditorInfoNote(
+                    systemImage: "clock.badge.checkmark",
+                    title: "已按可用时间适配",
+                    lines: [
+                        String(format: appLocalized("实际进入 %@ · 退出 %@"),
+                               EditorSliderValueFormat.seconds.text(for: resolved.enterDuration),
+                               EditorSliderValueFormat.seconds.text(for: resolved.exitDuration)),
+                        appLocalized("保留上方设定；片尾前完成退出，相邻动画紧接时连续衔接。")
+                    ]
+                )
             } else {
                 Text("设定时长均可完整播放。")
-                    .font(.appUI(.caption2)).foregroundStyle(.secondary)
+                    .font(.appUI(size: 10)).foregroundStyle(.secondary)
             }
         }
     }
@@ -50,11 +46,11 @@ extension EditorInspectorView {
                 HStack(alignment: .firstTextBaseline) {
                     if usesCompactSelectedAudioLayout {
                         Text(appLocalized(inherits ? "继承全片声音设置" : "已覆盖此段的声音设置"))
-                            .font(.appUI(.caption)).foregroundStyle(.secondary)
+                            .font(.appUI(size: 11)).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     } else {
                         Text(String(format: appLocalized("第 %lld 段"), Int64(context.index + 1)))
-                            .font(.appUI(.callout, weight: .semibold))
+                            .font(.appUI(size: 12, weight: .semibold))
                     }
                     Spacer(minLength: 4)
                     Text("\(segmentTimestamp(context.segment.outputStart)) – \(segmentTimestamp(context.segment.outputEnd))")
@@ -63,7 +59,7 @@ extension EditorInspectorView {
                 }
                 if !usesCompactSelectedAudioLayout {
                     Text(appLocalized(inherits ? "继承全片声音设置" : "已覆盖此段的声音设置"))
-                        .font(.appUI(.caption)).foregroundStyle(.secondary)
+                        .font(.appUI(size: 11)).foregroundStyle(.secondary)
                 }
                 HStack(spacing: 8) {
                     Button("定位到此段") {
@@ -83,7 +79,7 @@ extension EditorInspectorView {
                 }
                 if playbackTime < context.segment.outputStart || playbackTime >= context.segment.outputEnd {
                     Text("播放头在其他位置，当前调整仍只作用于选中片段。")
-                        .font(.appUI(.caption2)).foregroundStyle(.secondary)
+                        .font(.appUI(size: 10)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

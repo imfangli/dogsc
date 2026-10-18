@@ -1,108 +1,120 @@
-> [!IMPORTANT]
-> **首次打开提示：** DogSC 目前通过 GitHub 分发，暂不计划在 App Store 付费上架。当前测试版使用 Apple Development 开发签名，尚未采用 Developer ID 分发签名并完成 Apple 公证。
->
-> 下载 DMG 并将 DogSC 拖入「应用程序」后，如果 macOS 阻止打开，可在 **系统设置 → 隐私与安全性 → 仍要打开** 中允许。请确认文件来自本仓库的 [Releases](https://github.com/laogou717/dogsc/releases)，无需关闭系统安全保护。详见 [Apple 官方说明](https://support.apple.com/zh-cn/102445)。
->
-> App Store 上架与签名、公证是不同的流程；App Store 之外的应用也可以使用 [Developer ID](https://developer.apple.com/developer-id/) 分发。
-
 <p align="center">
-  <img src="Resources/AppIconMaster.png" width="112" alt="DogSC 应用图标">
+  <img src="Resources/AppIconMaster.png" width="128" alt="DogSC">
 </p>
 
 <h1 align="center">DogSC</h1>
 
-<p align="center">macOS 原生录屏与轻量编辑工具。录制、剪辑、运镜，到导出成片。</p>
-
 <p align="center">
-  <a href="https://github.com/laogou717/dogsc/releases/latest"><strong>下载 DogSC</strong></a>
-  · <a href="#从源码构建">从源码构建</a>
-  · <a href="https://github.com/laogou717/dogsc/issues">反馈问题</a>
+  <b>录得清楚，剪得轻松，运镜自然。</b><br>
+  macOS 原生的录屏与轻量剪辑工具。
 </p>
 
-![DogSC 编辑器：画面预览、布局设置与多轨时间线](docs/images/editor.png)
-
-## 录制
-
-![DogSC 悬浮录制条](docs/images/recorder.png)
-
-支持屏幕、窗口与区域录制，可同时录制摄像头、麦克风和系统声音。录制结束后，可以保存项目，或直接进入编辑。
-
-录制时仍可打开以前已完成的项目编辑。编辑窗口可以正常录入画面；录制条和备忘录等辅助窗口只从当前录制进程的画面中排除。使用另一实例或其他录屏工具做显示器／区域录制时，可以录入本软件的录制条、备忘录与首次使用引导。
-
-内置 **悬浮备忘录**，可独立拖动、调整大小、字号与背景不透明度。文稿自动保存在本机，重启后仍可使用；备忘录不会进入 DogSC 自身的录制画面。
-
-备忘录支持 **隐藏空行**，仅压缩阅读时的空白段落，保留完整原稿。开启 **精简模式** 后，标题和设置收起，主要显示白字提词内容；背景不透明度可调至 0%，窗口可缩至 240 × 140。完整模式与精简模式分别记住背景不透明度，切换模式会保留朗读和选中位置。
-
-在 **macOS 26 或更高版本**的受支持 Mac 上，备忘录还可开启 **语音跟读**：使用苹果本机普通话识别模型，高亮正在朗读的句子并自动滚动。可以从文稿中间开始、向前跳读或回头重读；重复短句需要更多上下文才能可靠定位，也可选中稿件后点 **从选中位置跟读**。手动滚动后，下一次可靠定位会继续跟随。模型未安装时按界面提示下载；朗读音频和识别文本不额外保存。麦克风监听与 **录制麦克风声音**独立，录制前、关闭麦克风音轨或暂停录制时都可练习提词。切换编辑模式或收起备忘录会停止监听，再次打开默认关闭。macOS 14–25 仍可手动阅读和滚动备忘录。
-
-详细操作和开发验证见 [语音跟读说明](docs/voice-follow.md)。
-
-编辑器左侧的 **字幕** 可在录制后使用苹果本机模型生成普通话字幕，支持麦克风、系统声音或成片混音。字幕可人工修改文字与时间，也可配置 OpenAI 兼容接口，结合口播稿和主题进行 AI 校对；默认白字、半透明黑色圆角底板，可调整颜色、字号和位置。预览与视频导出共用烧录效果，并支持 SRT 导出。识别需要 macOS 26+；详见 [字幕说明](docs/subtitles.md)。
-
-录制时可点 **标记按钮**或按 **⌃⌥M** 留下剪辑书签，方便之后找回口误、重录或重点位置。标记随项目保存，不会进入成片。
-
-## 编辑与运镜
-
-![DogSC 屏幕 3D 与动画轨道](docs/images/motion.png)
-
-- **时间线剪辑**：分割、裁短、重排、加速与恢复剪辑，支持缩略图／波形显示及边界吸附。
-- **开场与运镜**：开场动效、自动跟随、手动缩放，以及可调整倾斜、透视和聚焦虚化的屏幕 3D；暂停调整手动缩放时可直接预览目标构图。
-- **效果复用**：缩放、屏幕 3D、摄像运动、贴图和柔化片段可用 **⌘C / ⌘V** 复制、粘贴完整副本；优先放到鼠标所指的时间线位置，鼠标离开时间线则使用播放头；开启吸附后，贴近同类片段边缘可直接接上。**⌘⇧V** 向选中的同类组件粘贴属性，保留其位置和长度。
-- **光标与摄像头**：单独控制光标样式、点击反馈、静止后隐藏或始终隐藏；可独立校准光标时间，不改变移动平滑参数；调整摄像头布局与动画。
-- **画面设计**：比例、裁切、留白、圆角、阴影、背景与样机外框；支持贴图、画面柔化和场景预设。
-
-## 导出
-
 <p align="center">
-  <img src="docs/images/export.png" width="760" alt="DogSC 导出面板：视频或音频、分辨率与帧率选项">
+  <img src="https://img.shields.io/badge/macOS-14%2B-111111?style=flat-square" alt="macOS 14+">
+  <img src="https://img.shields.io/badge/Apple%20Silicon-arm64-111111?style=flat-square" alt="Apple Silicon">
+  <img src="https://img.shields.io/badge/简体中文%20%7C%20English-111111?style=flat-square" alt="简体中文 | English">
+  <img src="https://img.shields.io/badge/license-MIT-5aaeff?style=flat-square" alt="MIT License">
 </p>
 
-支持 **MP4 视频**与 **M4A 音频**。视频可选原始素材分辨率、1080p、1440p、4K，以及 **30／60 FPS**。保留 `.dogscproject` 项目包，方便以后继续编辑。
+<p align="center">
+  <a href="https://github.com/laogou717/dogsc/releases/latest"><b>下载</b></a>
+  &nbsp;·&nbsp;
+  <a href="#从源码构建">从源码构建</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/laogou717/dogsc/issues">反馈问题</a>
+</p>
 
-导出时显示处理阶段与已用时间，速度稳定后提供预计剩余时间；可随时取消。
+<p align="center">
+  <img src="docs/images/editor.png" alt="DogSC 编辑器：画面预览、背景设置与多轨时间线">
+</p>
 
-设置中的「关于」集中提供版本、软件更新、源码与反馈入口。软件免费使用；「请杯咖啡」可查看自愿支持的赞赏码，导出完成后也可打开。
+## 功能
 
-## 使用说明
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <b>录制</b><br>
+      显示器、窗口、区域，或用数据线连接的 iPhone／iPad。同时录摄像头、麦克风和系统声音。
+    </td>
+    <td width="50%" valign="top">
+      <b>剪辑</b><br>
+      分割、裁剪、重排、变速与恢复剪辑。缩略图和波形随时切换，边界自动吸附。
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <b>运镜</b><br>
+      自动跟随光标与手动缩放；屏幕 3D 的倾斜、透视与聚焦虚化；开场动效。
+    </td>
+    <td valign="top">
+      <b>画面</b><br>
+      比例、裁切、留白、圆角、阴影、背景与样机外框；贴图、柔化与突出；场景预设。
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <b>光标与摄像头</b><br>
+      光标样式、点击反馈、静止隐藏与时间校准；摄像头布局与出场动画。
+    </td>
+    <td valign="top">
+      <b>导出</b><br>
+      MP4 或 M4A；原始素材、1080p、1440p、4K；30／60 FPS。项目随时可以继续编辑。
+    </td>
+  </tr>
+</table>
 
-- **系统要求**：Apple Silicon Mac，macOS 14 或更高版本。
-- **首次授权**：按引导开启屏幕录制与辅助功能权限；麦克风、摄像头按需授权。
-- **预览性能**：测试版在完整分辨率、多效果叠加时仍可能掉帧，可降低预览质量，导出分辨率单独设置。
-- **界面截图**：来自当前开发版，使用 AI 海岸风景演示素材，无个人录制内容。README 对应当前源码，已下载版本请参照其发布说明。
+<p align="center">
+  <img src="docs/images/motion.png" alt="DogSC 运镜：缩放焦点、曲线与时间线片段">
+</p>
+
+## 小技巧
+
+- 录制时按 <kbd>⌃</kbd><kbd>⌥</kbd><kbd>M</kbd> 留下剪辑标记，之后在时间线上找回口误或重点。
+- 悬浮备忘录可以当提词器用，它不会被录进画面。
+- 在时间线上用 <kbd>⌘</kbd><kbd>C</kbd>／<kbd>⌘</kbd><kbd>V</kbd> 复制效果片段，<kbd>⌘</kbd><kbd>⇧</kbd><kbd>V</kbd> 只粘贴属性。
+- 完整快捷键见菜单栏「显示 → 快捷键速查」。
+
+## 此分支的扩展功能
+
+- **字幕**：使用苹果本机普通话模型生成字幕，支持人工编辑、AI 校对、字幕烧录与 SRT 导出；导出视频或音频时可同时输出同名 SRT，选区字幕按导出范围裁剪并从零开始。识别需要 macOS 26+，已有字幕可在 macOS 14+ 编辑和导出。详见 [字幕说明](docs/subtitles.md)。
+- **语音跟读提词器**：在受支持的 macOS 26+ 设备上实时高亮朗读位置并自动滚动；支持从选中位置开始、隐藏空行和精简透明模式。macOS 14–25 可手动阅读。详见 [语音跟读说明](docs/voice-follow.md)。
+- **精细倍速**：保留 1.1×、1.2×、1.3× 片段速度选项。
+- **AI 校对设置**：在「设置 → AI 校对」配置 OpenAI 兼容服务，密钥保存在系统钥匙串。
+
+## 开始使用
+
+1. 从 [Releases](https://github.com/laogou717/dogsc/releases/latest) 下载 DMG，把 DogSC 拖入「应用程序」。
+2. 按引导开启屏幕录制与辅助功能权限，麦克风和摄像头按需授权。
+3. 界面语言在「设置 → 通用」中切换，即时生效。
+
+> [!NOTE]
+> 当前测试版使用 Apple Development 签名，尚未经过 Apple 公证。首次打开如被拦截，请在「系统设置 → 隐私与安全性」中点「仍要打开」（[Apple 说明](https://support.apple.com/zh-cn/102445)）。请只从本仓库的 Releases 下载。
 
 ## 从源码构建
 
-需要 Apple Silicon Mac、**Xcode 26 或更新版本、Swift 6**，以及自己的 **Apple Development 签名证书**。无需作者的私钥或 GitHub Secrets。
-
 <details>
-<summary>查看构建命令与开发版说明</summary>
+<summary>需要 Apple Silicon Mac、Xcode 26+ 和你自己的 Apple Development 证书</summary>
+
+<br>
 
 ```bash
 git clone https://github.com/laogou717/dogsc.git
 cd dogsc
 
-# 查看本机可用的签名证书
+# 找到自己证书的 40 位 SHA-1 指纹
 security find-identity -v -p codesigning
 
-# 构建完整开发版 App
-DOGSC_SIGNING_IDENTITY="你的 Apple Development 证书的 40 位 SHA-1 指纹" bash build-app.sh
+DOGSC_SIGNING_IDENTITY="<SHA-1 指纹>" bash build-app.sh
 open ".build/local/DogSC Dev.app"
 ```
 
-可在 Xcode 的 Accounts → Manage Certificates 中创建自己的 Apple Development 证书，私钥保留在本机钥匙串。首次构建需要联网下载已锁定的 Sparkle 依赖。
-
-脚本进行 Release 构建，组装图标、字体、本地化资源与 Sparkle，并签署完整 App。仅运行 `swift build -c release` 只编译可执行文件，不生成完整 `.app`。
-
-产物为 **`.build/local/DogSC Dev.app`**（`cn.laogou.dogsc.dev`）。它与下载的 **DogSC**（`cn.laogou.dogsc`）使用独立偏好和系统权限，授权时请区分名称；开发版不连接正式版更新源。
-
-可通过 `DOGSC_APP_OUTPUT` 指定其他开发版产物路径，用于保留已有构建。
-
-默认使用 `/Applications/Xcode.app`；其他安装位置可通过 `DEVELOPER_DIR` 指向对应的 `Xcode.app/Contents/Developer`。重新构建前请保存并退出正在运行的 DogSC。
-
-源码包含录制、编辑实现与必要运行资源。系统壁纸、用户录制与项目文件不随源码分发；制作正式 DMG 与签名更新源所需的发布证书和 Sparkle 密钥由维护者单独配置。
+- 脚本完成 Release 编译，组装图标、字体、本地化与 Sparkle，并签名整个 App。单独 `swift build` 不会生成 `.app`。
+- 开发版 `DogSC Dev`（`cn.laogou.dogsc.dev`）与正式版的偏好和系统权限相互独立，也不接收正式版更新。
+- 可通过 `DOGSC_APP_OUTPUT` 指定其他开发版产物路径，用于保留已有构建。
+- Xcode 不在 `/Applications` 时，用 `DEVELOPER_DIR` 指定位置。首次构建需要联网下载 Sparkle。
 
 </details>
 
 ## 许可
 
-源代码采用 [MIT License](LICENSE)。随附字体采用其自身的许可，详见 [字体说明](Resources/Fonts/README.md) 与 [许可原文](Resources/Fonts/LICENSE.txt)。
+源代码采用 [MIT License](LICENSE)。随附字体遵循其自身许可，见 [字体说明](Resources/Fonts/README.md)。

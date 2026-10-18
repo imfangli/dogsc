@@ -6,50 +6,22 @@ import SwiftUI
 /// rectangle; legacy portrait/landscape projects retain their source plane.
 struct EditorScreenFramePicker: View {
     @ObservedObject var editorStore: EditorStore
+    var screenImage: NSImage? = nil
     let onError: (String) -> Void
 
-    private let columns = Array(repeating: GridItem(.flexible(minimum: 62), spacing: 10), count: 3)
     private let visibleStyles = ScreenFrameStyle.allCases
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            LazyVGrid(columns: columns, spacing: 7) {
-                ForEach(visibleStyles) { style in
-                    let current = editorStore.previewProject.canvas.screenFrame
-                    let isSelected = current == style || (style == .devicePhone && current.isDeviceFrame)
-                    Button {
-                        do {
-                            try ScreenFrameEditorCommand.select(
-                                style,
-                                store: editorStore
-                            )
-                        } catch {
-                            onError(error.localizedDescription)
-                        }
-                    } label: {
-                        VStack(spacing: 7) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(EditorTheme.chrome(isSelected ? 0.065 : 0.028))
-                                ScreenFrameMiniature(style: style).padding(10)
-                            }
-                            .aspectRatio(1, contentMode: .fit)
-                            .overlay(RoundedRectangle(cornerRadius: 12)
-                                .strokeBorder(isSelected ? EditorTheme.selectionTint.opacity(0.8) : EditorTheme.hairline,
-                                              lineWidth: isSelected ? 1.5 : 0.75))
-                            Text(appLocalized(style.editorShortName))
-                                .font(.appUI(size: 10.5, weight: isSelected ? .medium : .regular))
-                                .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                                .lineLimit(1).minimumScaleFactor(0.9)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.editorThumbnail)
-                    .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    .accessibilityLabel(appLocalized(style.editorDisplayName))
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
-                    .help("边框会和屏幕、光标一起缩放并进行 3D 变形")
+        VStack(alignment: .leading, spacing: 10) {
+            EditorMockupTurntable(
+                styles: visibleStyles,
+                selected: editorStore.previewProject.canvas.screenFrame,
+                screenImage: screenImage
+            ) { style in
+                do {
+                    try ScreenFrameEditorCommand.select(style, store: editorStore)
+                } catch {
+                    onError(error.localizedDescription)
                 }
             }
 
@@ -61,11 +33,11 @@ struct EditorScreenFramePicker: View {
                             store: editorStore, resetDefaults: true)
                     } catch { onError(error.localizedDescription) }
                 } label: {
-                    Label("还原样式", systemImage: "arrow.counterclockwise")
-                        .font(.appUI(size: 11)).foregroundStyle(.secondary)
+                    EditorSymbolLabel("还原样式", systemImage: "arrow.counterclockwise")
+                        .font(.appUI(size: 12))
                 }
-                .buttonStyle(.editorQuiet)
-                .appButtonKeyboardFocus(in: RoundedRectangle(cornerRadius: EditorInterfaceRadius.control, style: .continuous))
+                .buttonStyle(.editorGhost)
+                .appButtonKeyboardFocus(in: Capsule(style: .continuous))
                 .help("恢复当前样机的默认外观，保留标题和网址")
             }
 
@@ -218,7 +190,7 @@ private struct ScreenFrameMetadataField: View {
     var body: some View {
         HStack(spacing: 10) {
             Text(appLocalized(kind.title))
-                .font(.appUI(size: 10.5, weight: .medium))
+                .font(.appUI(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
                 .frame(width: 62, alignment: .leading)
                 .accessibilityHidden(true)
@@ -350,7 +322,7 @@ private struct ScreenFrameMiniature: View {
 
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.black.opacity(0.26))
+                    .fill(EditorTheme.chrome(0.16))
                     .frame(width: outer.width, height: outer.height)
                     .position(x: outer.midX, y: outer.midY)
 
@@ -536,5 +508,117 @@ private extension ScreenFrameStyle {
         case .deviceTablet: 4.0 / 3.0
         default: nil
         }
+    }
+}
+
+
+// MARK: - Mockup cards
+
+/// One mockup option shown the way it will look: the project's own paused
+/// frame, dressed in that frame's chrome, standing on a soft studio plate.
+/// The current choice is ringed in ink; everything else stays quiet.
+struct EditorMockupCard: View {
+    let style: ScreenFrameStyle
+    let screenImage: NSImage?
+    let isSelected: Bool
+    @Environment(\.consolePalette) private var palette
+    @State private var isHovered = false
+
+    var body: some View {
+        let card = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        GeometryReader { proxy in
+            let size = proxy.size
+            ZStack {
+                LinearGradient(colors: [EditorStageBackdrop.top, EditorStageBackdrop.bottom],
+                               startPoint: .top, endPoint: .bottom)
+                RadialGradient(colors: [EditorStageBackdrop.glow, .clear],
+                               center: UnitPoint(x: 0.5, y: 0.3), startRadius: 0, endRadius: size.width * 0.7)
+                mockup(in: size)
+                    .scaleEffect(isHovered && !RecorderMotion.reduces ? 1.035 : 1)
+            }
+        }
+        .aspectRatio(1.45, contentMode: .fit)
+        .clipShape(card)
+        .overlay {
+            card.strokeBorder(isSelected ? EditorTheme.platinumAccent : EditorTheme.chrome(0.06),
+                              lineWidth: isSelected ? 2 : 0.5)
+        }
+        .animation(SpringMotion.settle, value: isSelected)
+        .animation(SpringMotion.lift, value: isHovered)
+        .onHover { isHovered = $0 }
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func mockup(in size: CGSize) -> some View {
+        let isDark = style == .windowDark || style == .browserDark
+        switch style {
+        case .none:
+            screen(radius: 5)
+                .frame(width: size.width * 0.66, height: size.width * 0.66 / 1.6)
+                .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+        case .windowLight, .windowDark, .browserLight, .browserDark:
+            let width = size.width * 0.7
+            let bar: CGFloat = max(width * 0.075, 9)
+            VStack(spacing: 0) {
+                HStack(spacing: 3) {
+                    Circle().fill(Color(red: 1, green: 0.37, blue: 0.34))
+                    Circle().fill(Color(red: 1, green: 0.74, blue: 0.18))
+                    Circle().fill(Color(red: 0.16, green: 0.78, blue: 0.25))
+                    if style.isBrowserFrame {
+                        Capsule(style: .continuous)
+                            .fill(isDark ? Color.white.opacity(0.1) : Color.black.opacity(0.06))
+                            .frame(width: width * 0.42, height: bar * 0.5)
+                            .frame(maxWidth: .infinity)
+                        Color.clear.frame(width: 14, height: 1)
+                    } else {
+                        Spacer(minLength: 0)
+                    }
+                }
+                .frame(height: bar * 0.38)
+                .padding(.horizontal, bar * 0.45)
+                .frame(height: bar)
+                .background(isDark ? Color(white: 0.17) : Color(white: 0.965))
+                screen(radius: 0)
+            }
+            .frame(width: width, height: width / 1.6 + bar)
+            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(isDark ? Color.white.opacity(0.12) : Color.black.opacity(0.08), lineWidth: 0.5)
+            }
+            .shadow(color: .black.opacity(0.22), radius: 9, y: 4)
+        default:
+            // Device: a graphite bezel with a fine machined rim.
+            let width = size.width * 0.62
+            let bezel = max(width * 0.045, 3)
+            screen(radius: 4)
+                .padding(bezel)
+                .frame(width: width, height: width / 1.6 + bezel * 2)
+                .background {
+                    RoundedRectangle(cornerRadius: bezel * 3.2, style: .continuous)
+                        .fill(LinearGradient(colors: [Color(white: 0.16), Color(white: 0.08)],
+                                             startPoint: .top, endPoint: .bottom))
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: bezel * 3.2, style: .continuous)
+                        .strokeBorder(LinearGradient(colors: [Color(white: 0.72), Color(white: 0.32)],
+                                                     startPoint: .top, endPoint: .bottom), lineWidth: 0.8)
+                }
+                .shadow(color: .black.opacity(0.25), radius: 9, y: 4)
+        }
+    }
+
+    private func screen(radius: CGFloat) -> some View {
+        ZStack {
+            Color(white: 0.9)
+            if let screenImage {
+                Color.clear.overlay { Image(nsImage: screenImage).resizable().scaledToFill() }
+            } else {
+                LinearGradient(colors: [Color(red: 0.95, green: 0.78, blue: 0.62), Color(red: 0.88, green: 0.84, blue: 0.72)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
     }
 }

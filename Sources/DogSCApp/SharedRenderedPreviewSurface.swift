@@ -336,6 +336,12 @@ final class SharedRenderedPreviewNSView: NSView {
             itemTimeForDisplay: itemTimeForDisplay,
             uptime: link.targetTimestamp
         ) else { return }
+        // One Core Animation commit per tick: the frame's layer updates
+        // (cursor overlay, surface) and the timeline chrome are nested in
+        // this transaction instead of each committing the window on its own.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
         // The controller sampled one canonical clock above. Give the visible
         // frame first access to this display-link budget, then move the native
         // playhead/overview/time label from the exact same sample.

@@ -1030,7 +1030,7 @@ final class EditorStore: ObservableObject {
     func addMosaic(
         at time: TimeInterval,
         outputDuration: TimeInterval,
-        actionName: String = "添加打码"
+        actionName: String = "添加柔化"
     ) throws -> UUID {
         let safeStart = min(
             max(time, 0),
